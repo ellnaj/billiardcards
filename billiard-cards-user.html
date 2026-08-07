@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Billiard Card Game</title>
+<title>Billiard Card Game — Player</title>
 <style>
   :root{
     --bg:#0e1210; --panel:#161b18; --felt:#1f6d3f; --felt-light:#2c8a52;
@@ -17,15 +17,10 @@
   header p{margin:2px 0 0;font-size:.7rem;color:var(--muted);letter-spacing:2px;}
   .panel{background:var(--panel);border:1px solid #262e29;border-radius:14px;padding:14px;}
   .section-title{font-size:.7rem;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:8px;}
-  select{width:100%;padding:12px;border-radius:10px;background:#10140f;color:var(--white);border:1px solid #303a33;font-size:1rem;}
   .btn{display:block;width:100%;border:none;border-radius:12px;padding:16px;font-size:1.05rem;font-weight:700;letter-spacing:.5px;cursor:pointer;text-align:center;}
   .btn:active{transform:scale(.97);}
   .btn-primary{background:var(--felt);color:var(--white);}
-  .btn-primary:disabled{background:#2a332e;color:#5c655f;cursor:not-allowed;}
-  .btn-gold{background:var(--gold);color:#231c00;}
-  .btn-row{display:flex;gap:10px;}
   .btn-secondary{flex:1;background:#232a25;color:var(--white);padding:12px;border-radius:10px;border:1px solid #303a33;font-size:.85rem;font-weight:600;cursor:pointer;}
-  .btn-secondary:active{transform:scale(.97);}
 
   .balls-rack{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;}
   .ball{position:relative;aspect-ratio:1;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;color:var(--white);cursor:pointer;box-shadow:0 3px 6px rgba(0,0,0,.5);border:2px solid rgba(255,255,255,.15);}
@@ -55,6 +50,7 @@
   .modal p{font-size:.95rem;margin-top:0;}
   .modal .btn-row{margin-top:14px;}
   .modal h3{margin:0 0 14px;text-align:center;color:var(--gold);}
+  .btn-row{display:flex;gap:10px;}
 
   .pin-input{width:100%;padding:16px;font-size:1.6rem;text-align:center;letter-spacing:10px;border-radius:10px;border:1px solid #303a33;background:#10140f;color:var(--white);}
   .pin-error{color:var(--red);font-size:.8rem;text-align:center;min-height:1.1em;margin-top:8px;}
@@ -65,8 +61,7 @@
   .mini-card.black{color:var(--black);}
   .mini-card .suit{font-size:1.1rem;}
 
-  .setup-step{display:flex;flex-direction:column;gap:10px;}
-  .step-count{text-align:center;font-size:.75rem;color:var(--muted);}
+  .empty-state{text-align:center;color:var(--muted);padding:40px 10px;font-size:.9rem;line-height:1.6;}
 
   footer{text-align:center;font-size:.68rem;color:#555;padding-top:4px;}
 </style>
@@ -108,12 +103,6 @@
 (function(){
   "use strict";
 
-  const SUITS = [
-    {symbol:"♠",color:0},{symbol:"♥",color:1},
-    {symbol:"♦",color:1},{symbol:"♣",color:0}
-  ];
-  const RANKS = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
-  const RANK_TO_BALL = {A:1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,"10":10,J:11,Q:12,K:13};
   const BALL_COLORS = ["#e8c93a","#2d5fd6","#d13c3c","#7b3fbf","#e8791f","#1f8a4c","#8a1f2b","#111111"];
   function ballColor(n){ return BALL_COLORS[(n-1)%8]; }
   function ballIsStripe(n){ return n > 8; }
@@ -124,29 +113,9 @@
   }
 
   const STORAGE_KEY = "billiardGameState";
-  function saveState(){
-    try{
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        numPlayers, pins, names, hands, ballSunk, winnerIndex, inGame: true
-      }));
-    }catch(e){ /* storage unavailable, ignore */ }
-  }
-  function clearState(){
-    try{ localStorage.removeItem(STORAGE_KEY); }catch(e){}
-  }
-  // pick up changes made from the user page (e.g. a ball sunk there)
-  window.addEventListener("storage", (e) => {
-    if(e.key !== STORAGE_KEY || !e.newValue) return;
-    try{
-      const s = JSON.parse(e.newValue);
-      if(!s.inGame) return;
-      numPlayers = s.numPlayers; pins = s.pins; names = s.names;
-      hands = s.hands; ballSunk = s.ballSunk; winnerIndex = s.winnerIndex;
-      if(document.getElementById("ballsRack")) renderGame(true);
-    }catch(err){ /* ignore malformed state */ }
-  });
-
   const app = document.getElementById("app");
+
+  let numPlayers = 0, pins = [], names = [], hands = [], ballSunk = [], winnerIndex = null;
 
   // ---- confirm modal ----
   const confirmOverlay = document.getElementById("confirmOverlay");
@@ -226,128 +195,29 @@
     handOverlay.classList.add("show");
   }
 
-  // ---- deck ----
-  function cardsPerPlayer(n){
-    if(n <= 3) return 13;
-    if(n <= 5) return 8;
-    return 5;
+  // ---- state load / save ----
+  function loadState(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if(!raw) return false;
+      const s = JSON.parse(raw);
+      if(!s.inGame) return false;
+      numPlayers = s.numPlayers; pins = s.pins; names = s.names;
+      hands = s.hands; ballSunk = s.ballSunk; winnerIndex = s.winnerIndex;
+      return true;
+    }catch(e){ return false; }
   }
-  function buildDeck(){
-    const d = [];
-    for(const s of SUITS){
-      for(const r of RANKS){
-        d.push({label:r, suit:s.symbol, color:s.color, ball:RANK_TO_BALL[r]});
-      }
-    }
-    d.push({label:"JK", suit:"★", color:2, ball:14});
-    d.push({label:"JK", suit:"★", color:2, ball:15});
-    return d;
+  function saveState(){
+    try{
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        numPlayers, pins, names, hands, ballSunk, winnerIndex, inGame: true
+      }));
+    }catch(e){ /* ignore */ }
   }
-  function shuffleArray(arr){
-    for(let i = arr.length - 1; i > 0; i--){
-      const j = Math.floor(Math.random() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
-  }
-
-  // ---- state ----
-  let numPlayers = 4;
-  let pins = [];      // string per player
-  let names = [];      // string per player
-  let hands = [];
-  let ballSunk = [];
-  let winnerIndex = null;
-  let setupStep = 0;  // index of player currently setting PIN
-
-  renderSetupCount();
-
-  // ---------- SETUP: choose player count ----------
-  function renderSetupCount(){
-    app.innerHTML =
-      '<header><h1>BILLIARD CARD GAME</h1><p>SINK YOUR HAND FIRST</p></header>' +
-      '<div class="panel">' +
-        '<div class="section-title">Number of Players</div>' +
-        '<select id="playerSelect">' +
-          '<option value="2">2 Players (13 cards each)</option>' +
-          '<option value="3">3 Players (13 cards each)</option>' +
-          '<option value="4" selected>4 Players (8 cards each)</option>' +
-          '<option value="5">5 Players (8 cards each)</option>' +
-          '<option value="6">6 Players (5 cards each)</option>' +
-          '<option value="7">7 Players (5 cards each)</option>' +
-          '<option value="8">8 Players (5 cards each)</option>' +
-        '</select>' +
-        '<div style="height:10px;"></div>' +
-        '<button class="btn btn-primary" id="nextBtn">NEXT: SET PINS</button>' +
-      '</div>' +
-      '<footer>Each player sets a private PIN so no one else can view their hand</footer>';
-
-    document.getElementById("nextBtn").addEventListener("click", () => {
-      numPlayers = parseInt(document.getElementById("playerSelect").value, 10);
-      pins = new Array(numPlayers).fill("");
-      names = [];
-      for(let i = 0; i < numPlayers; i++) names.push("Player " + (i+1));
-      setupStep = 0;
-      renderPinSetupStep();
-    });
-  }
-
-  // ---------- SETUP: each player creates their own PIN ----------
-  function renderPinSetupStep(){
-    const p = setupStep;
-    app.innerHTML =
-      '<header><h1>SET YOUR PIN</h1><p>PLAYER ' + (p+1) + ' ONLY — HAND THE PHONE TO PLAYER ' + (p+1) + '</p></header>' +
-      '<div class="panel setup-step">' +
-        '<div class="step-count">Player ' + (p+1) + ' of ' + numPlayers + '</div>' +
-        '<div class="section-title">Your Name</div>' +
-        '<input class="pin-input" id="nameInput" style="letter-spacing:normal;font-size:1.1rem;" maxlength="20" value="' + names[p] + '" placeholder="Player ' + (p+1) + '">' +
-        '<div class="section-title" style="margin-top:12px;">Create a 4-digit PIN — don\'t let others see it</div>' +
-        '<input class="pin-input" id="pinCreate" type="tel" inputmode="numeric" maxlength="4" placeholder="••••">' +
-        '<input class="pin-input" id="pinConfirm" type="tel" inputmode="numeric" maxlength="4" placeholder="Confirm ••••">' +
-        '<div class="pin-error" id="stepError"></div>' +
-        '<button class="btn btn-primary" id="savePinBtn">SAVE &amp; CONTINUE</button>' +
-      '</div>' +
-      '<footer>This PIN will be needed every time to view Player ' + (p+1) + '\'s hand</footer>';
-
-    document.getElementById("savePinBtn").addEventListener("click", () => {
-      const a = document.getElementById("pinCreate").value.trim();
-      const b = document.getElementById("pinConfirm").value.trim();
-      const err = document.getElementById("stepError");
-      if(a.length !== 4 || !/^\d{4}$/.test(a)){
-        err.textContent = "PIN must be exactly 4 digits";
-        return;
-      }
-      if(a !== b){
-        err.textContent = "PINs do not match";
-        return;
-      }
-      pins[p] = a;
-      const nameVal = document.getElementById("nameInput").value.trim();
-      names[p] = nameVal || ("Player " + (p+1));
-      setupStep++;
-      if(setupStep < numPlayers){
-        renderPinSetupStep();
-      } else {
-        dealGame();
-      }
-    });
-  }
-
-  // ---------- deal & main game ----------
-  function dealGame(){
-    const perPlayer = cardsPerPlayer(numPlayers);
-    const deck = shuffleArray(buildDeck());
-    hands = [];
-    let idx = 0;
-    for(let p = 0; p < numPlayers; p++){
-      hands.push(deck.slice(idx, idx + perPlayer));
-      idx += perPlayer;
-    }
-    ballSunk = new Array(16).fill(false);
-    winnerIndex = null;
-    saveState();
-    renderGame();
-  }
+  window.addEventListener("storage", (e) => {
+    if(e.key !== STORAGE_KEY) return;
+    render();
+  });
 
   function sinkBall(n){
     if(ballSunk[n] || winnerIndex !== null) return;
@@ -364,11 +234,18 @@
       }
     }
     saveState();
-    renderGame(true);
+    render();
   }
 
-  function renderGame(keepScroll){
-    const scrollY = window.scrollY;
+  function render(){
+    if(!loadState()){
+      app.innerHTML =
+        '<header><h1>BILLIARD CARD GAME</h1><p>PLAYER VIEW</p></header>' +
+        '<div class="panel"><div class="empty-state">No game in progress yet.<br>Ask the host to deal a game on the admin page, then reload this page.</div></div>' +
+        '<footer>Fully offline · No data leaves this device</footer>';
+      return;
+    }
+
     app.innerHTML =
       '<header><h1>BILLIARD CARD GAME</h1><p>PASS THE PHONE — ENTER YOUR PIN TO VIEW</p></header>' +
       (winnerIndex !== null ?
@@ -387,11 +264,7 @@
         '<div class="section-title">Players — enter your PIN to view your hand</div>' +
         '<div class="players-list" id="playersList"></div>' +
       '</div>' +
-      '<div class="btn-row">' +
-        '<button class="btn-secondary" id="newGameBtn">NEW GAME</button>' +
-        '<button class="btn-secondary" id="resetBtn">RESET</button>' +
-      '</div>' +
-      '<footer>Fully offline · PINs are stored only in this browser tab</footer>';
+      '<footer>Fully offline · PINs are stored only in this browser</footer>';
 
     const rack = document.getElementById("ballsRack");
     for(let n = 1; n <= 15; n++){
@@ -419,17 +292,6 @@
       const name = document.createElement("div");
       name.className = "player-name";
       name.textContent = names[p] + (winnerIndex === p ? " 🏆" : "");
-      name.title = "Tap to rename";
-      name.style.cursor = "pointer";
-      name.addEventListener("click", () => {
-        const newName = prompt("Rename " + names[p] + ":", names[p]);
-        if(newName !== null){
-          const trimmed = newName.trim();
-          names[p] = trimmed || names[p];
-          saveState();
-          renderGame(true);
-        }
-      });
       const meta = document.createElement("div");
       meta.className = "player-meta";
       meta.textContent = hands[p].length + " card" + (hands[p].length === 1 ? "" : "s") + " remaining";
@@ -452,16 +314,10 @@
       row.appendChild(btn);
       list.appendChild(row);
     }
-
-    document.getElementById("newGameBtn").addEventListener("click", () => {
-      askConfirm("Start a new game with the same players and PINs?", dealGame);
-    });
-    document.getElementById("resetBtn").addEventListener("click", () => {
-      askConfirm("Reset the game? Cards will be redealt, PINs stay the same.", dealGame);
-    });
-
-    if(keepScroll) window.scrollTo(0, scrollY);
   }
+
+  render();
+  setInterval(render, 1500); // pick up changes made on the admin page
 })();
 </script>
 </body>
