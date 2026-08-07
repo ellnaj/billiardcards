@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Billiard Card Game</title>
+<style>
+  :root{
+    --bg:#0e1210; --panel:#161b18; --felt:#1f6d3f; --felt-light:#2c8a52;
+    --gold:#d4af37; --white:#f5f5f0; --red:#d13c3c; --black:#1a1a1a; --muted:#8a9490;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;background:var(--bg);color:var(--white);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;overflow-x:hidden;}
+  .app{max-width:480px;margin:0 auto;padding:14px 14px 40px;display:flex;flex-direction:column;gap:12px;}
+  header{text-align:center;}
+  header h1{margin:0;font-size:1.3rem;letter-spacing:1px;color:var(--felt-light);}
+  header p{margin:2px 0 0;font-size:.7rem;color:var(--muted);letter-spacing:2px;}
+  .panel{background:var(--panel);border:1px solid #262e29;border-radius:14px;padding:14px;}
+  .section-title{font-size:.7rem;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:8px;}
+  select{width:100%;padding:12px;border-radius:10px;background:#10140f;color:var(--white);border:1px solid #303a33;font-size:1rem;}
+  .btn{display:block;width:100%;border:none;border-radius:12px;padding:16px;font-size:1.05rem;font-weight:700;letter-spacing:.5px;cursor:pointer;text-align:center;}
+  .btn:active{transform:scale(.97);}
+  .btn-primary{background:var(--felt);color:var(--white);}
+  .btn-primary:disabled{background:#2a332e;color:#5c655f;cursor:not-allowed;}
+  .btn-gold{background:var(--gold);color:#231c00;}
+  .btn-row{display:flex;gap:10px;}
+  .btn-secondary{flex:1;background:#232a25;color:var(--white);padding:12px;border-radius:10px;border:1px solid #303a33;font-size:.85rem;font-weight:600;cursor:pointer;}
+  .btn-secondary:active{transform:scale(.97);}
+
+  .balls-rack{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;}
+  .ball{position:relative;aspect-ratio:1;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;color:var(--white);cursor:pointer;box-shadow:0 3px 6px rgba(0,0,0,.5);border:2px solid rgba(255,255,255,.15);}
+  .ball .num{background:#fff;color:#111;border-radius:50%;width:58%;height:58%;display:flex;align-items:center;justify-content:center;}
+  .ball.sunk{opacity:.25;filter:grayscale(1);cursor:default;}
+  .ball.stripe{background:linear-gradient(#fff 30%, var(--bc) 30%, var(--bc) 70%, #fff 70%);}
+  .ball.solid{background:var(--bc);}
+
+  .link-list{display:flex;flex-direction:column;gap:8px;}
+  .link-row{background:#10140f;border:1px solid #262e29;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;}
+  .link-row .top{display:flex;justify-content:space-between;align-items:center;}
+  .link-row .pname{font-weight:700;font-size:.9rem;}
+  .link-row .pmeta{font-size:.72rem;color:var(--muted);}
+  .copy-btn{background:var(--felt);color:var(--white);border:none;border-radius:8px;padding:8px 12px;font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap;}
+  .copy-btn.copied{background:var(--gold);color:#231c00;}
+  .link-url{font-size:.68rem;color:#6f7a74;word-break:break-all;background:#0a0d0a;border-radius:6px;padding:6px 8px;}
+
+  .hand-grid{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;}
+  .mini-card{width:50px;height:70px;background:var(--white);border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:700;font-size:.9rem;box-shadow:0 2px 5px rgba(0,0,0,.4);}
+  .mini-card.red{color:var(--red);}
+  .mini-card.black{color:var(--black);}
+  .mini-card .suit{font-size:1.1rem;}
+
+  .reveal-placeholder{text-align:center;padding:40px 0;color:var(--muted);font-weight:700;letter-spacing:1px;cursor:pointer;font-size:1rem;}
+
+  .status-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.85rem;}
+  .status-grid div{background:#10140f;border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:2px;}
+  .status-grid .label{color:var(--muted);font-size:.68rem;text-transform:uppercase;letter-spacing:.5px;}
+  .status-grid .value{font-weight:700;}
+
+  .winner-banner{text-align:center;color:var(--gold);font-weight:800;font-size:1.2rem;padding:14px 0;}
+
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;padding:20px;z-index:50;}
+  .modal-overlay.show{display:flex;}
+  .modal{background:var(--panel);border-radius:14px;padding:20px;max-width:360px;width:100%;border:1px solid #262e29;}
+  .modal p{font-size:.95rem;margin-top:0;}
+  .modal .btn-row{margin-top:14px;}
+
+  footer{text-align:center;font-size:.68rem;color:#555;padding-top:4px;}
+</style>
+</head>
+<body>
+<div class="app" id="app"></div>
+
+<div class="modal-overlay" id="confirmOverlay">
+  <div class="modal">
+    <p id="confirmText">Are you sure?</p>
+    <div class="btn-row">
+      <button class="btn-secondary" id="confirmCancel">Cancel</button>
+      <button class="btn btn-primary" id="confirmOk" style="flex:1;">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  const SUITS = [
+    {symbol:"♠",color:"black"},{symbol:"♥",color:"red"},
+    {symbol:"♦",color:"red"},{symbol:"♣",color:"black"}
+  ];
+  const RANKS = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
+  const RANK_TO_BALL = {A:1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,"10":10,J:11,Q:12,K:13};
+  const BALL_COLORS = ["#e8c93a","#2d5fd6","#d13c3c","#7b3fbf","#e8791f","#1f8a4c","#8a1f2b","#111111"];
+  function ballColor(n){ return BALL_COLORS[(n-1)%8]; }
+  function ballIsStripe(n){ return n > 8; }
+
+  const app = document.getElementById("app");
+  const confirmOverlay = document.getElementById("confirmOverlay");
+  const confirmText = document.getElementById("confirmText");
+  let pendingConfirmAction = null;
+  document.getElementById("confirmCancel").addEventListener("click", () => {
+    confirmOverlay.classList.remove("show"); pendingConfirmAction = null;
+  });
+  document.getElementById("confirmOk").addEventListener("click", () => {
+    if(pendingConfirmAction) pendingConfirmAction();
+    confirmOverlay.classList.remove("show"); pendingConfirmAction = null;
+  });
+  function askConfirm(msg, action){
+    confirmText.textContent = msg;
+    pendingConfirmAction = action;
+    confirmOverlay.classList.add("show");
+  }
+
+  // ---------- deck / dealing ----------
+  function cardsPerPlayer(n){
+    if(n <= 3) return 13;
+    if(n <= 5) return 8;
+    return 5;
+  }
+  function buildDeck(){
+    const d = [];
+    for(const s of SUITS){
+      for(const r of RANKS){
+        d.push({label:r, suit:s.symbol, color:s.color === "black" ? 0 : 1, ball:RANK_TO_BALL[r]});
+      }
+    }
+    d.push({label:"JK", suit:"★", color:2, ball:14});
+    d.push({label:"JK", suit:"★", color:2, ball:15});
+    return d;
+  }
+  function shuffleArray(arr){
+    for(let i = arr.length - 1; i > 0; i--){
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  // ---------- compact encode/decode for URL ----------
+  function encodeHand(hand){
+    const compact = hand.map(c => [c.label, c.suit, c.color, c.ball]);
+    const json = JSON.stringify(compact);
+    let b64 = btoa(unescape(encodeURIComponent(json)));
+    return b64.replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  }
+  function decodeHand(str){
+    let b64 = str.replace(/-/g,'+').replace(/_/g,'/');
+    while(b64.length % 4) b64 += '=';
+    const json = decodeURIComponent(escape(atob(b64)));
+    const compact = JSON.parse(json);
+    return compact.map(c => ({label:c[0], suit:c[1], color:c[2], ball:c[3]}));
+  }
+
+  function baseUrl(){
+    return location.origin + location.pathname;
+  }
+
+  // ---------- routing ----------
+  const hash = new URLSearchParams(location.hash.slice(1));
+  if(hash.has('h') && hash.has('p')){
+    renderPlayerView(parseInt(hash.get('p'), 10), decodeHand(hash.get('h')), parseInt(hash.get('n') || '0', 10));
+  } else {
+    renderHostView();
+  }
+
+  // ---------- HOST VIEW ----------
+  function renderHostView(){
+    app.innerHTML =
+      '<header><h1>BILLIARD CARD GAME</h1><p>DEALER / HOST</p></header>' +
+      '<div class="panel" id="setupPanel">' +
+        '<div class="section-title">Number of Players</div>' +
+        '<select id="playerSelect">' +
+          '<option value="2">2 Players (13 cards each)</option>' +
+          '<option value="3">3 Players (13 cards each)</option>' +
+          '<option value="4" selected>4 Players (8 cards each)</option>' +
+          '<option value="5">5 Players (8 cards each)</option>' +
+          '<option value="6">6 Players (5 cards each)</option>' +
+          '<option value="7">7 Players (5 cards each)</option>' +
+          '<option value="8">8 Players (5 cards each)</option>' +
+        '</select>' +
+        '<div style="height:10px;"></div>' +
+        '<button class="btn btn-primary" id="dealBtn">DEAL &amp; GENERATE LINKS</button>' +
+      '</div>' +
+      '<div class="panel" id="linksPanel" style="display:none;">' +
+        '<div class="section-title">Send each link to that player only — open on their own phone</div>' +
+        '<div class="link-list" id="linkList"></div>' +
+      '</div>' +
+      '<div id="hostActions" style="display:none;">' +
+        '<button class="btn btn-secondary" id="redealBtn" style="width:100%;">DEAL NEW GAME</button>' +
+      '</div>' +
+      '<footer>Fully offline · Each link only contains that player\'s own hand</footer>';
+
+    document.getElementById("dealBtn").addEventListener("click", dealAndShowLinks);
+    const redeal = document.getElementById("redealBtn");
+    if(redeal) redeal.addEventListener("click", () => {
+      askConfirm("Deal a new game? Old links will stop working once players reload.", dealAndShowLinks);
+    });
+  }
+
+  function dealAndShowLinks(){
+    const numPlayers = parseInt(document.getElementById("playerSelect").value, 10);
+    const perPlayer = cardsPerPlayer(numPlayers);
+    const deck = shuffleArray(buildDeck());
+    const hands = [];
+    let idx = 0;
+    for(let p = 0; p < numPlayers; p++){
+      hands.push(deck.slice(idx, idx + perPlayer));
+      idx += perPlayer;
+    }
+
+    const linkList = document.getElementById("linkList");
+    linkList.innerHTML = "";
+    for(let p = 0; p < numPlayers; p++){
+      const url = baseUrl() + "#p=" + (p+1) + "&n=" + numPlayers + "&h=" + encodeHand(hands[p]);
+      const row = document.createElement("div");
+      row.className = "link-row";
+      row.innerHTML =
+        '<div class="top">' +
+          '<div><div class="pname">Player ' + (p+1) + '</div><div class="pmeta">' + hands[p].length + ' cards</div></div>' +
+          '<button class="copy-btn" data-url="' + encodeURIComponent(url) + '">COPY LINK</button>' +
+        '</div>' +
+        '<div class="link-url">' + url + '</div>';
+      linkList.appendChild(row);
+    }
+    linkList.querySelectorAll(".copy-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const url = decodeURIComponent(btn.getAttribute("data-url"));
+        copyText(url, btn);
+      });
+    });
+
+    document.getElementById("setupPanel").style.display = "none";
+    document.getElementById("linksPanel").style.display = "block";
+    document.getElementById("hostActions").style.display = "block";
+  }
+
+  function copyText(text, btn){
+    function done(){
+      const old = btn.textContent;
+      btn.textContent = "COPIED";
+      btn.classList.add("copied");
+      setTimeout(() => { btn.textContent = old; btn.classList.remove("copied"); }, 1500);
+    }
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+    } else {
+      fallbackCopy(text, done);
+    }
+  }
+  function fallbackCopy(text, cb){
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try{ document.execCommand("copy"); }catch(e){}
+    document.body.removeChild(ta);
+    cb();
+  }
+
+  // ---------- PLAYER VIEW ----------
+  function renderPlayerView(playerNum, hand, totalPlayers){
+    let sunk = new Array(16).fill(false);
+    let revealed = false;
+
+    function renderBallsRack(){
+      const rack = document.getElementById("ballsRack");
+      rack.innerHTML = "";
+      for(let n = 1; n <= 15; n++){
+        const div = document.createElement("div");
+        const isSunk = sunk[n];
+        div.className = "ball " + (ballIsStripe(n) ? "stripe" : "solid") + (isSunk ? " sunk" : "");
+        div.style.setProperty("--bc", ballColor(n));
+        const num = document.createElement("span");
+        num.className = "num";
+        num.textContent = n;
+        div.appendChild(num);
+        if(!isSunk){
+          div.addEventListener("click", () => {
+            sunk[n] = true;
+            for(let i = hand.length - 1; i >= 0; i--){
+              if(hand[i].ball === n) hand.splice(i, 1);
+            }
+            renderAll();
+          });
+        }
+        rack.appendChild(div);
+      }
+    }
+
+    function renderHand(){
+      const area = document.getElementById("handArea");
+      area.innerHTML = "";
+      if(!revealed){
+        const ph = document.createElement("div");
+        ph.className = "reveal-placeholder";
+        ph.textContent = "TAP TO REVEAL";
+        ph.addEventListener("click", () => { revealed = true; renderHand(); });
+        area.appendChild(ph);
+        return;
+      }
+      if(hand.length === 0){
+        const ph = document.createElement("div");
+        ph.className = "reveal-placeholder";
+        ph.textContent = "";
+        area.appendChild(ph);
+      } else {
+        const grid = document.createElement("div");
+        grid.className = "hand-grid";
+        hand.forEach(c => {
+          const mc = document.createElement("div");
+          const colorClass = c.color === 1 ? "red" : "black";
+          mc.className = "mini-card " + colorClass;
+          mc.innerHTML = "<div>" + c.label + "</div><div class='suit'>" + c.suit + "</div>";
+          grid.appendChild(mc);
+        });
+        area.appendChild(grid);
+        const hideBtn = document.createElement("button");
+        hideBtn.className = "btn btn-primary";
+        hideBtn.style.marginTop = "10px";
+        hideBtn.textContent = "HIDE CARDS";
+        hideBtn.addEventListener("click", () => { revealed = false; renderHand(); });
+        area.appendChild(hideBtn);
+      }
+    }
+
+    function renderStatus(){
+      document.getElementById("remainingVal").textContent = hand.length;
+      const sunkCount = sunk.filter(Boolean).length;
+      document.getElementById("sunkVal").textContent = sunkCount + " / 15";
+      const winnerPanel = document.getElementById("winnerPanel");
+      winnerPanel.style.display = hand.length === 0 ? "block" : "none";
+    }
+
+    function renderAll(){
+      renderBallsRack();
+      renderHand();
+      renderStatus();
+    }
+
+    app.innerHTML =
+      '<header><h1>BILLIARD CARD GAME</h1><p>PLAYER ' + playerNum + ' OF ' + totalPlayers + '</p></header>' +
+      '<div class="panel" id="winnerPanel" style="display:none;">' +
+        '<div class="winner-banner">\uD83C\uDFC6 YOU\'RE OUT — YOU WIN!</div>' +
+      '</div>' +
+      '<div class="panel">' +
+        '<div class="section-title">Your Hand — private to this device</div>' +
+        '<div id="handArea"></div>' +
+      '</div>' +
+      '<div class="panel">' +
+        '<div class="section-title">Ball Rack — tap when YOU see a ball sink</div>' +
+        '<div class="balls-rack" id="ballsRack"></div>' +
+      '</div>' +
+      '<div class="panel">' +
+        '<div class="status-grid">' +
+          '<div><span class="label">Cards Left</span><span class="value" id="remainingVal">0</span></div>' +
+          '<div><span class="label">Balls Sunk</span><span class="value" id="sunkVal">0 / 15</span></div>' +
+        '</div>' +
+      '</div>' +
+      '<footer>This hand exists only on this device</footer>';
+
+    renderAll();
+  }
+})();
+</script>
+</body>
+</html>
