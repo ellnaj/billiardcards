@@ -137,6 +137,11 @@
   .modal .btn-row{margin-top:14px;}
   .modal h3{margin:0 0 14px;text-align:center;color:var(--gold);font-family:'Bebas Neue',Impact,sans-serif;font-size:1.3rem;letter-spacing:1px;font-weight:400;}
 
+  .login-name-input{width:100%;background:#0d1210;border:1px solid var(--border);border-radius:var(--radius-sm);padding:13px 14px;font-size:.85rem;font-weight:600;color:var(--white);font-family:inherit;margin:4px 0 2px;outline:none;text-align:center;transition:border-color .15s ease;}
+  .login-name-input:focus{border-color:var(--felt-light);}
+  .login-name-input::placeholder{color:var(--muted-dim);font-weight:500;}
+  #loginOverlay{align-items:flex-start;}
+  #loginOverlay .modal{border-radius:22px;margin-top:calc(56px + var(--safe-t));}
   .pin-input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none;}
   .pin-dots{display:flex;justify-content:center;gap:16px;padding:18px 0 6px;cursor:text;}
   .pin-dots .dot{width:18px;height:18px;border-radius:50%;border:2px solid #384139;background:#0d1210;transition:all .15s ease;}
@@ -188,6 +193,21 @@
 <body>
 <div class="app" id="app"></div>
 <div class="toast-container" id="toastContainer"></div>
+
+<div class="modal-overlay show" id="loginOverlay">
+  <div class="modal">
+    <h3>Confirm you're registered</h3>
+    <p style="text-align:center;color:var(--muted);font-size:.82rem;margin-top:-8px;">Enter your name and PIN to continue</p>
+    <input class="login-name-input" id="loginName" type="text" placeholder="Your name" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false">
+    <div class="pin-dots" id="loginPinDots">
+      <span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+    </div>
+    <input class="pin-input" id="loginPinInput" type="tel" inputmode="numeric" maxlength="4" autocomplete="off">
+    <div class="pin-error" id="loginError"></div>
+    <div class="pin-hint" id="loginHint">Tap the dots to enter your 4-digit PIN</div>
+    <button class="btn btn-primary" id="loginSubmit" style="margin-top:14px;">Enter</button>
+  </div>
+</div>
 
 <div class="modal-overlay" id="pinOverlay">
   <div class="modal">
@@ -275,6 +295,9 @@
   const app = document.getElementById("app");
 
   let numPlayers = 0, pins = [], names = [], hands = [], ballSunk = [], ballSunkBy = [], ballOwners = [], winnerIndex = null, scores = [];
+
+  // ---- who's holding this phone right now ----
+  let loggedIn = false, myPlayerIndex = null;
 
   function getInitials(name){
     const parts = (name || "").trim().split(/\s+/).filter(Boolean);
@@ -487,6 +510,116 @@
     }
   }
 
+  // ---- login gate: confirm this phone belongs to a registered player ----
+  const loginOverlay = document.getElementById("loginOverlay");
+  const loginName = document.getElementById("loginName");
+  const loginPinInput = document.getElementById("loginPinInput");
+  const loginPinDots = document.getElementById("loginPinDots");
+  const loginError = document.getElementById("loginError");
+  const loginSubmit = document.getElementById("loginSubmit");
+  const LOGIN_NAME_KEY = "billiardCards_myName", LOGIN_PIN_KEY = "billiardCards_myPin";
+
+  function updateLoginPinDots(){
+    const dots = loginPinDots.querySelectorAll(".dot");
+    const len = loginPinInput.value.length;
+    dots.forEach((d, i) => d.classList.toggle("filled", i < len));
+  }
+  loginPinDots.addEventListener("click", () => loginPinInput.focus());
+  loginName.addEventListener("input", () => {
+    const pos = loginName.selectionStart;
+    const before = loginName.value;
+    const after = before.toUpperCase();
+    if(after !== before){
+      loginName.value = after;
+      loginName.setSelectionRange(pos, pos);
+    }
+  });
+  loginPinInput.addEventListener("input", () => {
+    loginPinInput.value = loginPinInput.value.replace(/\D/g, "").slice(0, 4);
+    updateLoginPinDots();
+  });
+  loginName.addEventListener("keydown", e => { if(e.key === "Enter") loginPinInput.focus(); });
+  loginPinInput.addEventListener("keydown", e => { if(e.key === "Enter") attemptLogin(); });
+  loginSubmit.addEventListener("click", attemptLogin);
+
+  // Matches the typed name + PIN against the currently-loaded roster. Returns the player's
+  // index on success, or -1/-2 to distinguish "no such name" from "wrong PIN" in the error copy.
+  function findPlayerByCredentials(nameVal, pinVal){
+    const idx = names.findIndex(n => (n || "").trim().toLowerCase() === nameVal.trim().toLowerCase());
+    if(idx === -1) return -1;
+    if(pins[idx] !== pinVal) return -2;
+    return idx;
+  }
+
+  function attemptLogin(){
+    const nameVal = loginName.value.trim();
+    const pinVal = loginPinInput.value.trim();
+    if(!nameVal){
+      loginError.textContent = "Enter your name";
+      shakeModal(loginOverlay);
+      return;
+    }
+    if(pinVal.length !== 4){
+      loginError.textContent = "Enter your 4-digit PIN";
+      shakeModal(loginOverlay);
+      return;
+    }
+    if(numPlayers === 0){
+      loginError.textContent = "No game in progress yet — ask the host to deal first";
+      shakeModal(loginOverlay);
+      return;
+    }
+    const result = findPlayerByCredentials(nameVal, pinVal);
+    if(result === -1){
+      loginError.textContent = "That name isn't registered for this game";
+      vibrate([30,40,30]);
+      shakeModal(loginOverlay);
+      return;
+    }
+    if(result === -2){
+      loginError.textContent = "Incorrect PIN";
+      vibrate([30,40,30]);
+      shakeModal(loginOverlay);
+      loginPinInput.value = "";
+      updateLoginPinDots();
+      loginPinInput.focus();
+      return;
+    }
+    completeLogin(result, names[result], pinVal);
+  }
+
+  function completeLogin(idx, nameVal, pinVal){
+    loggedIn = true;
+    myPlayerIndex = idx;
+    try{
+      sessionStorage.setItem(LOGIN_NAME_KEY, nameVal);
+      sessionStorage.setItem(LOGIN_PIN_KEY, pinVal);
+    }catch(e){}
+    vibrate(12);
+    loginOverlay.classList.remove("show");
+    render();
+  }
+
+  // If this device already confirmed a player earlier this session, re-match them
+  // automatically once the roster loads instead of asking again.
+  function tryAutoLogin(){
+    if(loggedIn || numPlayers === 0) return;
+    let savedName = null, savedPin = null;
+    try{
+      savedName = sessionStorage.getItem(LOGIN_NAME_KEY);
+      savedPin = sessionStorage.getItem(LOGIN_PIN_KEY);
+    }catch(e){}
+    if(!savedName || !savedPin) return;
+    const idx = findPlayerByCredentials(savedName, savedPin);
+    if(idx >= 0){
+      loggedIn = true;
+      myPlayerIndex = idx;
+      loginOverlay.classList.remove("show");
+    }
+  }
+
+  setTimeout(() => loginName.focus(), 200);
+
   // ---- "Who Sunk Ball #" picker ----
   // Unsunk ball: any player can tap a name to record who sunk it.
   // Already-sunk ball: view only — shows who's credited (and flags a mismatch in red if
@@ -654,6 +787,10 @@
 
   async function render(){
     const ok = await loadState();
+    if(ok){
+      tryAutoLogin();
+      loginOverlay.classList.toggle("show", !loggedIn);
+    }
     if(!ok){
       app.innerHTML =
         '<header><h1 class="display">🎱 BILLIARD CARDS</h1><p>PLAYER VIEW</p></header>' +
@@ -669,7 +806,7 @@
         '<div class="header-top"><h1 class="display">🎱 BILLIARD CARDS</h1>' +
           '<span class="sync-badge"><span class="sync-dot" id="syncDot"></span><span id="syncLabel">Connecting…</span></span>' +
         '</div>' +
-        '<p>PASS THE PHONE — ENTER YOUR PIN TO VIEW</p>' +
+        '<p>' + (myPlayerIndex !== null ? escapeHtml(names[myPlayerIndex]) + '\u2019S VIEW' : 'PLAYER VIEW') + '</p>' +
       '</header>' +
       '<div class="panel">' +
         '<div class="section-title-row">' +
@@ -690,10 +827,11 @@
           '<div><span class="label">Balls Sunk</span><span class="value">' + sunkCount + ' / 15</span></div>' +
         '</div>' +
       '</div>' +
+      (myPlayerIndex !== null ?
       '<div class="panel">' +
-        '<div class="section-title">Players — enter your PIN to view your hand</div>' +
+        '<div class="section-title">Your hand</div>' +
         '<div class="players-list" id="playersList"></div>' +
-      '</div>' +
+      '</div>' : '') +
       '<footer>Auto-syncs across every phone at the table · PINs stay private to each player</footer>';
 
     const scoreRows = document.getElementById("scoreRows");
@@ -759,7 +897,8 @@
     }
 
     const list = document.getElementById("playersList");
-    for(let p = 0; p < numPlayers; p++){
+    if(list && myPlayerIndex !== null){
+      const p = myPlayerIndex;
       const row = document.createElement("div");
       row.className = "player-row" + (winnerIndex === p ? " winner" : "");
       const left = document.createElement("div");
@@ -780,15 +919,9 @@
       btn.className = "view-btn";
       btn.textContent = "VIEW";
       btn.disabled = hands[p].length === 0;
-      btn.addEventListener("click", () => {
-        openPin(names[p] + "'s PIN", (val) => {
-          if(val === pins[p]){
-            openHand(names[p], hands[p], p);
-            return true;
-          }
-          return false;
-        });
-      });
+      // Identity is already confirmed at the login gate, so viewing your own hand
+      // no longer needs a PIN re-check here.
+      btn.addEventListener("click", () => openHand(names[p], hands[p], p));
       row.appendChild(left);
       row.appendChild(btn);
       list.appendChild(row);
