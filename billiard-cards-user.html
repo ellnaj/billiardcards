@@ -294,7 +294,7 @@
 
   const app = document.getElementById("app");
 
-  let numPlayers = 0, pins = [], names = [], hands = [], ballSunk = [], ballSunkBy = [], ballOwners = [], winnerIndex = null, scores = [];
+  let numPlayers = 0, pins = [], names = [], hands = [], ballSunk = [], ballSunkBy = [], ballOwners = [], winnerIndex = null, scores = [], joinedPlayers = [];
 
   // ---- who's holding this phone right now ----
   let loggedIn = false, myPlayerIndex = null;
@@ -597,6 +597,7 @@
     }catch(e){}
     vibrate(12);
     loginOverlay.classList.remove("show");
+    markPlayerJoined(idx);
     render();
   }
 
@@ -615,6 +616,7 @@
       loggedIn = true;
       myPlayerIndex = idx;
       loginOverlay.classList.remove("show");
+      markPlayerJoined(idx);
     }
   }
 
@@ -720,6 +722,7 @@
       ballOwners = data.ball_owners || new Array(16).fill(null);
       winnerIndex = data.winner_index;
       scores = data.scores || new Array(numPlayers).fill(0);
+      joinedPlayers = data.joined_players || [];
       return true;
     }catch(e){ console.error("Supabase load failed:", e); return false; }
   }
@@ -729,7 +732,7 @@
   // so ball_sunk_by keeps saving even if ball_owners' column is the one that's missing.
   // Silently dropping both whenever either was missing is what used to make the
   // "ball doesn't match your hand" warning silently stop persisting.
-  const OPTIONAL_COLUMNS = ["ball_sunk_by", "ball_owners"];
+  const OPTIONAL_COLUMNS = ["ball_sunk_by", "ball_owners", "joined_players"];
   function missingColumnField(error){
     const msg = (error && error.message) || "";
     return OPTIONAL_COLUMNS.find(f => new RegExp(f, "i").test(msg)) || null;
@@ -745,6 +748,22 @@
       console.warn("Supabase 'games' table is missing column '" + field + "' — saving without it. Run the migration to add it so this data persists.");
     }
     return { error: new Error("Supabase save failed after column fallback") };
+  }
+
+  // Marks this player as joined so the admin's player list can show a green dot for them.
+  // Only ever sets its own index to true — never touches other players' entries.
+  async function markPlayerJoined(idx){
+    if(!supabaseClient || !gameRowId) return;
+    if(joinedPlayers[idx]) return; // already recorded, no need to write again
+    joinedPlayers[idx] = true;
+    const payload = { joined_players: joinedPlayers };
+    try{
+      const { error } = await runWithColumnFallback(payload, p =>
+        supabaseClient.from("games").update(p).eq("id", gameRowId)
+      );
+      if(error) console.error("Supabase update error (joined flag):", error);
+      else markSynced();
+    }catch(e){ console.error("Supabase update failed (joined flag):", e); }
   }
 
   // Persist a ball-sink update.

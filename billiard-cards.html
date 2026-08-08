@@ -99,6 +99,10 @@
   .ball-sunk-badge.mismatch{border-color:var(--red);box-shadow:0 0 0 2px rgba(232,73,92,.65),0 1px 3px rgba(0,0,0,.5);}
   .ball-mismatch-flag{position:absolute;bottom:4%;right:4%;width:34%;height:34%;background:var(--red);color:#fff;font-size:.65rem;font-weight:900;border-radius:50%;display:flex;align-items:center;justify-content:center;border:1.5px solid #12492a;z-index:3;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,.6);}
 
+  .player-icon-wrap{position:relative;flex:none;}
+  .joined-dot{position:absolute;bottom:-2px;right:-2px;width:12px;height:12px;border-radius:50%;background:var(--muted-dim);border:2px solid var(--panel);transition:background .2s ease,box-shadow .2s ease;}
+  .joined-dot.joined{background:var(--felt-glow);box-shadow:0 0 6px rgba(63,191,120,.65);}
+
   .players-list{display:flex;flex-direction:column;gap:8px;}
   .player-row{display:flex;align-items:center;justify-content:space-between;background:#0d1210;border:1px solid var(--border);border-radius:var(--radius-sm);padding:11px 12px;transition:border-color .2s ease,background .2s ease;}
   .player-row.winner{border-color:var(--gold);background:#1c1a0d;}
@@ -555,6 +559,7 @@
       ballOwners = data.ball_owners || new Array(16).fill(null);
       winnerIndex = data.winner_index;
       scores = data.scores || new Array(numPlayers).fill(0);
+      joinedPlayers = data.joined_players || [];
       return true;
     }catch(e){ console.error("Supabase load failed:", e); return false; }
   }
@@ -810,6 +815,7 @@
   let ballOwners = []; // per ball number: player indices who actually held a matching card at sink time
   let winnerIndex = null;
   let scores = [];    // wins per player, across "New Game" replays this session
+  let joinedPlayers = []; // true per player index once they've confirmed name+PIN on their own phone
   let setupStep = 0;  // index of player currently setting PIN
   let carryOver = null; // {names, pins} snapshot offered for reuse when "Keep Players" is chosen
 
@@ -1138,7 +1144,7 @@
         '</div>' +
       '</div>' +
       '<div class="panel">' +
-        '<div class="section-title">Players — enter your PIN to view your hand</div>' +
+        '<div class="section-title">Players — green dot means they\u2019ve joined on their phone</div>' +
         '<div class="players-list" id="playersList"></div>' +
       '</div>' +
       '<div class="btn-row">' +
@@ -1191,10 +1197,17 @@
       row.className = "player-row" + (winnerIndex === p ? " winner" : "");
       const left = document.createElement("div");
       left.className = "player-left";
+      const iconWrap = document.createElement("div");
+      iconWrap.className = "player-icon-wrap";
       const icon = document.createElement("div");
       icon.className = "player-icon";
       if(winnerIndex !== p) icon.style.background = playerColor(p);
       icon.textContent = getInitials(names[p]);
+      const joinedDot = document.createElement("span");
+      joinedDot.className = "joined-dot" + (joinedPlayers[p] ? " joined" : "");
+      joinedDot.title = joinedPlayers[p] ? names[p] + " has joined on their phone" : names[p] + " hasn't opened their view yet";
+      iconWrap.appendChild(icon);
+      iconWrap.appendChild(joinedDot);
       const textWrap = document.createElement("div");
       textWrap.style.minWidth = "0";
       const name = document.createElement("div");
@@ -1204,7 +1217,7 @@
       name.style.cursor = "pointer";
       name.addEventListener("click", () => openRename(p));
       textWrap.appendChild(name);
-      left.appendChild(icon);
+      left.appendChild(iconWrap);
       left.appendChild(textWrap);
       const btn = document.createElement("button");
       btn.className = "view-btn";
