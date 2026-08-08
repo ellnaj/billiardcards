@@ -2,88 +2,202 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0f0c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Billiard Card Game — Player</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#0e1210; --panel:#161b18; --felt:#1f6d3f; --felt-light:#2c8a52;
-    --gold:#d4af37; --white:#f5f5f0; --red:#d13c3c; --black:#1a1a1a; --muted:#8a9490;
+    --bg:#090d0b; --panel:#141a16; --panel-hi:#1a2119; --felt:#1f6d3f; --felt-light:#2c8a52; --felt-glow:#3fbf78;
+    --gold:#e8c04a; --gold-bright:#ffd75e; --gold-dim:#9c7d2e;
+    --white:#f5f5f0; --red:#e8495c; --black:#161616; --muted:#889089; --muted-dim:#5c655f;
+    --border:#242c26; --chalk:#57a7d8;
+    --radius-lg:20px; --radius-md:14px; --radius-sm:10px;
+    --safe-b:env(safe-area-inset-bottom,0px);
+    --safe-t:env(safe-area-inset-top,0px);
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-  html,body{margin:0;background:var(--bg);color:var(--white);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;overflow-x:hidden;}
-  .app{max-width:480px;margin:0 auto;padding:14px 14px 40px;display:flex;flex-direction:column;gap:12px;}
-  header{text-align:center;}
-  header h1{margin:0;font-size:1.3rem;letter-spacing:1px;color:var(--felt-light);}
-  header p{margin:2px 0 0;font-size:.7rem;color:var(--muted);letter-spacing:2px;}
-  .panel{background:var(--panel);border:1px solid #262e29;border-radius:14px;padding:14px;}
-  .section-title{font-size:.7rem;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:8px;}
-  .btn{display:block;width:100%;border:none;border-radius:12px;padding:16px;font-size:1.05rem;font-weight:700;letter-spacing:.5px;cursor:pointer;text-align:center;}
-  .btn:active{transform:scale(.97);}
-  .btn-primary{background:var(--felt);color:var(--white);}
-  .btn-secondary{flex:1;background:#232a25;color:var(--white);padding:12px;border-radius:10px;border:1px solid #303a33;font-size:.85rem;font-weight:600;cursor:pointer;}
+  html,body{margin:0;background:var(--bg);color:var(--white);
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    overflow-x:hidden;overscroll-behavior-y:contain;}
+  body{
+    background:
+      radial-gradient(ellipse 900px 500px at 50% -8%, rgba(47,138,82,.22), transparent 60%),
+      radial-gradient(ellipse 700px 500px at 90% 100%, rgba(87,167,216,.08), transparent 60%),
+      var(--bg);
+    min-height:100vh;
+  }
+  .display{font-family:'Bebas Neue',Impact,'Arial Narrow',sans-serif;letter-spacing:1.5px;}
+  .app{max-width:480px;margin:0 auto;padding:calc(14px + var(--safe-t)) 14px calc(48px + var(--safe-b));display:flex;flex-direction:column;gap:12px;}
 
-  .balls-rack{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;}
-  .ball{position:relative;aspect-ratio:1;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;color:var(--white);cursor:pointer;box-shadow:0 3px 6px rgba(0,0,0,.5);border:2px solid rgba(255,255,255,.15);}
-  .ball .num{background:#fff;color:#111;border-radius:50%;width:58%;height:58%;display:flex;align-items:center;justify-content:center;}
-  .ball.sunk{opacity:.25;filter:grayscale(1);cursor:default;}
-  .ball.stripe{background:linear-gradient(#fff 30%, var(--bc) 30%, var(--bc) 70%, #fff 70%);}
-  .ball.solid{background:var(--bc);}
+  header{text-align:center;padding:2px 2px 4px;}
+  .header-top{display:flex;align-items:center;justify-content:center;gap:10px;position:relative;}
+  header h1{margin:0;font-size:1.7rem;color:var(--felt-glow);text-shadow:0 0 22px rgba(63,191,120,.35);}
+  header p{margin:4px 0 0;font-size:.66rem;color:var(--muted);letter-spacing:2.5px;text-transform:uppercase;}
+  .sync-badge{position:absolute;right:0;display:flex;align-items:center;gap:5px;font-size:.62rem;color:var(--muted);letter-spacing:.3px;background:#0d1210;border:1px solid var(--border);border-radius:20px;padding:4px 9px 4px 7px;}
+  .sync-dot{width:7px;height:7px;border-radius:50%;background:var(--muted-dim);flex:none;}
+  .sync-dot.online{background:var(--chalk);box-shadow:0 0 0 0 rgba(87,167,216,.6);animation:syncPulse 2.4s ease-out infinite;}
+  .sync-dot.offline{background:var(--red);}
+  @keyframes syncPulse{0%{box-shadow:0 0 0 0 rgba(87,167,216,.55);}70%{box-shadow:0 0 0 7px rgba(87,167,216,0);}100%{box-shadow:0 0 0 0 rgba(87,167,216,0);}}
 
-  .players-list{display:flex;flex-direction:column;gap:8px;}
-  .player-row{display:flex;align-items:center;justify-content:space-between;background:#10140f;border:1px solid #262e29;border-radius:10px;padding:10px 12px;}
-  .player-row.winner{border-color:var(--gold);background:#1c1a0d;}
-  .player-name{font-weight:700;font-size:.95rem;}
-  .player-meta{font-size:.75rem;color:var(--muted);}
-  .view-btn{background:var(--felt);color:var(--white);border:none;border-radius:8px;padding:8px 12px;font-size:.8rem;font-weight:700;cursor:pointer;}
-  .view-btn:disabled{background:#2a332e;color:#5c655f;cursor:not-allowed;}
+  .panel{background:linear-gradient(180deg,var(--panel-hi),var(--panel));border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;box-shadow:0 10px 24px -12px rgba(0,0,0,.6);}
+  .section-title{font-size:.68rem;text-transform:uppercase;letter-spacing:1.3px;color:var(--muted);margin-bottom:9px;font-weight:600;}
+  .section-title-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px;}
+  .section-title-row .section-title{margin-bottom:0;}
+  .games-played-badge{display:flex;align-items:center;gap:6px;background:#0d1210;border:1px solid var(--border);border-radius:20px;padding:4px 11px;flex:none;}
+  .games-played-label{font-size:.6rem;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);}
+  .games-played-value{font-size:.95rem;font-weight:800;color:var(--gold);}
 
-  .status-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.85rem;}
-  .status-grid div{background:#10140f;border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:2px;}
-  .status-grid .label{color:var(--muted);font-size:.68rem;text-transform:uppercase;letter-spacing:.5px;}
-  .status-grid .value{font-weight:700;}
-
-  .winner-banner{text-align:center;color:var(--gold);font-weight:800;font-size:1.1rem;padding:10px 0;}
-
-  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;padding:20px;z-index:50;}
-  .modal-overlay.show{display:flex;}
-  .modal{background:var(--panel);border-radius:14px;padding:20px;max-width:360px;width:100%;border:1px solid #262e29;max-height:80vh;overflow-y:auto;}
-  .modal p{font-size:.95rem;margin-top:0;}
-  .modal .btn-row{margin-top:14px;}
-  .modal h3{margin:0 0 14px;text-align:center;color:var(--gold);}
+  .btn{position:relative;overflow:hidden;display:block;width:100%;border:none;border-radius:var(--radius-md);padding:16px;font-size:1.02rem;font-weight:700;letter-spacing:.4px;cursor:pointer;text-align:center;font-family:inherit;-webkit-user-select:none;user-select:none;transition:transform .12s ease;}
+  .btn:active{transform:scale(.965);}
+  .btn-primary{background:linear-gradient(135deg,var(--felt-light),var(--felt) 70%);color:var(--white);box-shadow:0 6px 16px -6px rgba(44,138,82,.55);}
+  .btn-secondary{position:relative;overflow:hidden;flex:1;background:#1a211c;color:var(--white);padding:13px;border-radius:var(--radius-sm);border:1px solid #303a33;font-size:.85rem;font-weight:600;cursor:pointer;font-family:inherit;transition:transform .12s ease;}
+  .btn-secondary:active{transform:scale(.965);}
   .btn-row{display:flex;gap:10px;}
 
-  .pin-input{width:100%;padding:16px;font-size:1.6rem;text-align:center;letter-spacing:10px;border-radius:10px;border:1px solid #303a33;background:#10140f;color:var(--white);}
-  .pin-error{color:var(--red);font-size:.8rem;text-align:center;min-height:1.1em;margin-top:8px;}
+  .ripple{position:absolute;border-radius:50%;background:rgba(255,255,255,.32);transform:scale(0);animation:rippleAnim .6s ease-out;pointer-events:none;}
+  @keyframes rippleAnim{to{transform:scale(2.7);opacity:0;}}
 
-  .hand-grid{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-bottom:6px;}
-  .mini-card{width:46px;height:64px;background:var(--white);border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;box-shadow:0 2px 5px rgba(0,0,0,.4);}
+  .progress-track{height:7px;border-radius:6px;background:#0c110d;overflow:hidden;margin-bottom:12px;border:1px solid var(--border);}
+  .progress-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--felt-light),var(--gold));transition:width .5s cubic-bezier(.16,1,.3,1);}
+
+  /* --- Ball rack styled like a pool table rail --- */
+  .rack-rail{
+    background:
+      linear-gradient(180deg, rgba(0,0,0,.18), rgba(0,0,0,.32)),
+      radial-gradient(ellipse at 50% 0%, #1f6d3f, #12492a 75%);
+    border:1px solid #0c3820;
+    border-radius:16px;
+    padding:16px 12px;
+    position:relative;
+    box-shadow:inset 0 0 0 6px #6b4226, inset 0 0 0 8px #4a2c18, inset 0 2px 10px rgba(0,0,0,.5);
+  }
+  .rack-rail::before,.rack-rail::after{content:"";position:absolute;top:9px;bottom:9px;width:2px;background:repeating-linear-gradient(180deg, var(--gold-dim) 0 6px, transparent 6px 16px);opacity:.55;}
+  .rack-rail::before{left:9px;}
+  .rack-rail::after{right:9px;}
+  .balls-rack{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;}
+  .ball-wrap{position:relative;aspect-ratio:1;cursor:pointer;transition:transform .12s ease;}
+  .ball-wrap:active{transform:scale(.92);}
+  .ball{position:absolute;inset:0;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;color:var(--white);box-shadow:0 3px 8px rgba(0,0,0,.55),inset 0 -3px 5px rgba(0,0,0,.25);border:2px solid rgba(255,255,255,.14);overflow:hidden;}
+  .ball::after{content:"";position:absolute;inset:0;background:radial-gradient(circle at 32% 26%, rgba(255,255,255,.65), rgba(255,255,255,0) 42%);pointer-events:none;}
+  .ball .num{position:relative;z-index:1;background:#fff;color:#111;border-radius:50%;width:58%;height:58%;display:flex;align-items:center;justify-content:center;}
+  .ball.sunk{opacity:.28;filter:grayscale(1);}
+  .ball.stripe{background:linear-gradient(#fff 30%, var(--bc) 30%, var(--bc) 70%, #fff 70%);}
+  .ball.solid{background:var(--bc);}
+  .ball.just-sunk{animation:ballPop .75s cubic-bezier(.34,1.56,.64,1);}
+  @keyframes ballPop{0%{transform:scale(1);}30%{transform:scale(1.4);box-shadow:0 0 0 9px rgba(232,192,74,.35),0 3px 8px rgba(0,0,0,.55);}100%{transform:scale(1);}}
+  .ball-sunk-badge{position:absolute;top:6%;left:50%;transform:translateX(-50%);width:40%;height:19%;background:var(--gold);color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.6);font-size:.62rem;font-weight:800;border-radius:50%;display:flex;align-items:center;justify-content:center;border:1.5px solid #12492a;z-index:2;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,.5);}
+  .ball-sunk-badge.mismatch{border-color:var(--red);box-shadow:0 0 0 2px rgba(232,73,92,.65),0 1px 3px rgba(0,0,0,.5);}
+  .ball-mismatch-flag{position:absolute;bottom:4%;right:4%;width:34%;height:34%;background:var(--red);color:#fff;font-size:.65rem;font-weight:900;border-radius:50%;display:flex;align-items:center;justify-content:center;border:1.5px solid #12492a;z-index:3;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,.6);}
+
+  .players-list{display:flex;flex-direction:column;gap:8px;}
+  .player-row{display:flex;align-items:center;justify-content:space-between;background:#0d1210;border:1px solid var(--border);border-radius:var(--radius-sm);padding:11px 12px;transition:border-color .2s ease,background .2s ease;}
+  .player-row.winner{border-color:var(--gold);background:#1c1a0d;}
+  .player-left{display:flex;align-items:center;gap:10px;min-width:0;}
+  .player-icon{width:36px;height:36px;border-radius:50%;background:var(--felt);color:var(--white);font-weight:800;font-size:.8rem;display:flex;align-items:center;justify-content:center;flex:none;box-shadow:0 2px 6px rgba(0,0,0,.4);}
+  .player-row.winner .player-icon{background:var(--gold);color:#231c00;}
+  .player-name{font-weight:700;font-size:.95rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .view-btn{position:relative;overflow:hidden;background:linear-gradient(135deg,var(--felt-light),var(--felt));color:var(--white);border:none;border-radius:9px;padding:9px 13px;font-size:.8rem;font-weight:700;cursor:pointer;font-family:inherit;transition:transform .12s ease;}
+  .view-btn:active{transform:scale(.94);}
+  .view-btn:disabled{background:#222b25;color:var(--muted-dim);cursor:not-allowed;}
+
+  .score-rows{display:flex;flex-direction:column;gap:8px;}
+  .score-row{display:flex;justify-content:center;gap:8px;}
+  .score-cell{width:64px;flex:none;background:#0d1210;border:1px solid var(--border);border-radius:var(--radius-sm);padding:9px 4px 7px;display:flex;flex-direction:column;align-items:center;gap:4px;transition:border-color .2s ease,background .2s ease;}
+  .score-cell.leader{border-color:var(--gold);background:#1c1a0d;box-shadow:0 0 0 1px rgba(232,192,74,.25);}
+  .score-initial{width:30px;height:30px;border-radius:50%;background:var(--felt);color:var(--white);font-weight:800;font-size:.8rem;display:flex;align-items:center;justify-content:center;flex:none;}
+  .score-cell.leader .score-initial{box-shadow:0 0 0 2px var(--gold);}
+  .score-count{font-family:'Bebas Neue',Impact,sans-serif;font-weight:400;letter-spacing:.5px;font-size:1.3rem;color:var(--gold);line-height:1;}
+
+  .status-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.85rem;}
+  .status-grid div{background:#0d1210;border:1px solid var(--border);border-radius:var(--radius-sm);padding:9px 11px;display:flex;flex-direction:column;gap:2px;}
+  .status-grid .label{color:var(--muted);font-size:.66rem;text-transform:uppercase;letter-spacing:.5px;}
+  .status-grid .value{font-weight:700;font-size:1rem;}
+
+  .winner-banner{text-align:center;font-weight:900;font-size:1.35rem;padding:4px 0;letter-spacing:.3px;}
+  .winner-panel{border-width:2px;border-style:solid;animation:winnerPop .45s cubic-bezier(.34,1.56,.64,1),winnerGlow 2.2s ease-in-out infinite;}
+  @keyframes winnerPop{0%{transform:scale(.88);opacity:0;}100%{transform:scale(1);opacity:1;}}
+  @keyframes winnerGlow{0%,100%{filter:brightness(1);}50%{filter:brightness(1.25);}}
+
+  .modal-overlay{position:fixed;inset:0;background:rgba(4,7,5,.72);backdrop-filter:blur(2px);display:none;align-items:flex-end;justify-content:center;padding:0;z-index:50;}
+  .modal-overlay.show{display:flex;animation:backdropIn .22s ease;}
+  @keyframes backdropIn{from{opacity:0;}to{opacity:1;}}
+  .modal{background:linear-gradient(180deg,var(--panel-hi),var(--panel));border-radius:22px 22px 0 0;padding:26px 20px calc(20px + var(--safe-b));max-width:480px;width:100%;border:1px solid var(--border);border-bottom:none;max-height:82vh;overflow-y:auto;position:relative;box-shadow:0 -14px 40px rgba(0,0,0,.55);}
+  .modal-overlay.show .modal{animation:sheetUp .34s cubic-bezier(.16,1,.3,1);}
+  @keyframes sheetUp{from{transform:translateY(28px);opacity:.4;}to{transform:translateY(0);opacity:1;}}
+  .modal::before{content:"";position:absolute;top:10px;left:50%;transform:translateX(-50%);width:38px;height:4px;border-radius:3px;background:#39423c;}
+  .modal.shake{animation:sheetShake .4s ease;}
+  @keyframes sheetShake{0%,100%{transform:translateX(0);}20%{transform:translateX(-9px);}40%{transform:translateX(8px);}60%{transform:translateX(-6px);}80%{transform:translateX(4px);}}
+  .modal p{font-size:.95rem;margin-top:0;}
+  .modal .btn-row{margin-top:14px;}
+  .modal h3{margin:0 0 14px;text-align:center;color:var(--gold);font-family:'Bebas Neue',Impact,sans-serif;font-size:1.3rem;letter-spacing:1px;font-weight:400;}
+
+  .pin-input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none;}
+  .pin-dots{display:flex;justify-content:center;gap:16px;padding:18px 0 6px;cursor:text;}
+  .pin-dots .dot{width:18px;height:18px;border-radius:50%;border:2px solid #384139;background:#0d1210;transition:all .15s ease;}
+  .pin-dots .dot.filled{background:var(--gold);border-color:var(--gold);transform:scale(1.12);box-shadow:0 0 10px rgba(232,192,74,.5);}
+  .pin-error{color:var(--red);font-size:.8rem;text-align:center;min-height:1.1em;margin-top:6px;}
+  .pin-hint{text-align:center;color:var(--muted);font-size:.72rem;margin-top:2px;}
+
+  .who-sunk-list{display:flex;flex-direction:column;gap:8px;max-height:50vh;overflow-y:auto;}
+  .who-sunk-row{position:relative;overflow:hidden;display:flex;align-items:center;width:100%;text-align:left;background:#0d1210;border:1px solid var(--border);border-radius:var(--radius-sm);padding:11px 12px;color:var(--white);font-size:.95rem;font-weight:700;font-family:inherit;transition:transform .12s ease,border-color .15s ease;}
+  .who-sunk-row.selectable{cursor:pointer;}
+  .who-sunk-row.selectable:active{transform:scale(.98);}
+  .who-sunk-row.selected{border-color:var(--gold);background:#1c1a0d;}
+  .who-sunk-text{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;}
+  .who-sunk-warn{color:var(--red);font-size:.68rem;font-weight:600;letter-spacing:.2px;}
+  .who-sunk-check{margin-left:auto;padding-left:8px;color:var(--gold);flex:none;white-space:nowrap;}
+  .who-sunk-empty{color:var(--muted);text-align:center;padding:20px 10px;font-size:.9rem;}
+  .who-sunk-hint{color:var(--muted);text-align:center;font-size:.72rem;margin-top:10px;line-height:1.4;}
+
+  .hand-grid{display:flex;flex-wrap:wrap;gap:9px;justify-content:center;margin-bottom:8px;}
+  .mini-card{width:50px;height:70px;background:linear-gradient(160deg,#ffffff,#eef0e8);border-radius:7px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:700;font-size:.9rem;box-shadow:0 4px 10px rgba(0,0,0,.45);animation:cardDeal .4s cubic-bezier(.16,1,.3,1) both;}
+  .mini-card:nth-child(1){animation-delay:.02s;} .mini-card:nth-child(2){animation-delay:.05s;} .mini-card:nth-child(3){animation-delay:.08s;}
+  .mini-card:nth-child(4){animation-delay:.11s;} .mini-card:nth-child(5){animation-delay:.14s;} .mini-card:nth-child(6){animation-delay:.17s;}
+  .mini-card:nth-child(n+7){animation-delay:.2s;}
+  @keyframes cardDeal{from{transform:translateY(14px) scale(.85);opacity:0;}to{transform:translateY(0) scale(1);opacity:1;}}
   .mini-card.red{color:var(--red);}
   .mini-card.black{color:var(--black);}
-  .mini-card .suit{font-size:1.1rem;}
+  .mini-card .suit{font-size:1.15rem;}
 
-  .empty-state{text-align:center;color:var(--muted);padding:40px 10px;font-size:.9rem;line-height:1.6;}
+  .empty-state{text-align:center;color:var(--muted);padding:44px 10px;font-size:.92rem;line-height:1.7;}
+  .empty-state .big{font-size:2.4rem;display:block;margin-bottom:8px;}
 
-  footer{text-align:center;font-size:.68rem;color:#555;padding-top:4px;}
+  .toast-container{position:fixed;left:0;right:0;bottom:calc(18px + var(--safe-b));display:flex;flex-direction:column;align-items:center;gap:8px;z-index:90;pointer-events:none;padding:0 16px;}
+  .toast{max-width:420px;background:#141a16f0;border:1px solid var(--border);color:var(--white);font-size:.85rem;font-weight:600;padding:11px 18px;border-radius:30px;box-shadow:0 8px 22px rgba(0,0,0,.5);opacity:0;transform:translateY(10px) scale(.96);transition:all .28s cubic-bezier(.16,1,.3,1);text-align:center;}
+  .toast.show{opacity:1;transform:translateY(0) scale(1);}
+  .toast.gold{border-color:var(--gold);color:var(--gold-bright);}
+
+  .confetti-canvas{position:fixed;inset:0;pointer-events:none;z-index:80;}
+
+  .skeleton{background:linear-gradient(90deg,#141a16 25%,#1c241f 37%,#141a16 63%);background-size:400% 100%;animation:skeletonShine 1.4s ease infinite;border-radius:var(--radius-lg);}
+  @keyframes skeletonShine{0%{background-position:100% 0;}100%{background-position:0 0;}}
+
+  footer{text-align:center;font-size:.68rem;color:#4c5750;padding-top:6px;line-height:1.5;}
+
+  @media (prefers-reduced-motion:reduce){
+    *{animation-duration:.001ms !important;animation-iteration-count:1 !important;transition-duration:.001ms !important;}
+  }
 </style>
 </head>
 <body>
 <div class="app" id="app"></div>
-
-<div class="modal-overlay" id="confirmOverlay">
-  <div class="modal">
-    <p id="confirmText">Are you sure?</p>
-    <div class="btn-row">
-      <button class="btn-secondary" id="confirmCancel">Cancel</button>
-      <button class="btn btn-primary" id="confirmOk" style="flex:1;">Confirm</button>
-    </div>
-  </div>
-</div>
+<div class="toast-container" id="toastContainer"></div>
 
 <div class="modal-overlay" id="pinOverlay">
   <div class="modal">
     <h3 id="pinTitle">Enter PIN</h3>
-    <input class="pin-input" id="pinInput" type="tel" inputmode="numeric" maxlength="4" placeholder="••••">
+    <div class="pin-dots" id="pinDots">
+      <span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+    </div>
+    <input class="pin-input" id="pinInput" type="tel" inputmode="numeric" maxlength="4" autocomplete="off">
     <div class="pin-error" id="pinError"></div>
+    <div class="pin-hint">Tap the dots to enter your 4-digit PIN</div>
     <div class="btn-row">
       <button class="btn-secondary" id="pinCancel">Cancel</button>
       <button class="btn btn-primary" id="pinSubmit" style="flex:1;">Unlock</button>
@@ -99,57 +213,252 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="whoSunkOverlay">
+  <div class="modal">
+    <h3 id="whoSunkTitle">Who Sunk Ball #</h3>
+    <div class="who-sunk-list" id="whoSunkList"></div>
+    <button class="btn btn-primary" id="whoSunkClose" style="margin-top:12px;">CLOSE</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script>
 (function(){
   "use strict";
 
+  // ---- Supabase connection ----
+  // Mostly read-only on this page — the only write this page performs is recording who
+  // sunk a ball the FIRST time (players can call their own shots). Editing who gets credit
+  // for an already-sunk ball is admin-only and only happens on the admin page.
+  const SUPABASE_URL = "https://szrfxvipmolmnbyuenuk.supabase.co";
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN6cmZ4dmlwbW9sbW5ieXVlbnVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxNzIyOTAsImV4cCI6MjEwMTc0ODI5MH0.29oWzL9sbfEiEid8s261dk5irc7WG1vQrAZlz6_byNA";
+  let supabaseClient = null;
+  try{
+    supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }catch(e){
+    console.error("Supabase init failed — check SUPABASE_URL / SUPABASE_ANON_KEY:", e);
+  }
+  let gameRowId = null;
+
   const BALL_COLORS = ["#e8c93a","#2d5fd6","#d13c3c","#7b3fbf","#e8791f","#1f8a4c","#8a1f2b","#111111"];
   function ballColor(n){ return BALL_COLORS[(n-1)%8]; }
   function ballIsStripe(n){ return n > 8; }
+  // Distinct identity color per player, used consistently across icons, badges & score cells
+  // so it's easy to tell players apart at a glance. Keep this palette identical to the admin page.
+  const PLAYER_COLORS = ["#e0546b","#3fa9e0","#e0a83c","#4fc77e","#a06fe0","#e0793c","#3ecfc0","#e05fc2"];
+  function playerColor(p){ return (p == null) ? "#555" : PLAYER_COLORS[p % PLAYER_COLORS.length]; }
+  function hexToRgba(hex, alpha){
+    const h = hex.replace("#", "");
+    const r = parseInt(h.substring(0,2), 16), g = parseInt(h.substring(2,4), 16), b = parseInt(h.substring(4,6), 16);
+    return "rgba(" + r + "," + g + "," + b + "," + alpha + ")";
+  }
+  function winnerBannerHtml(winnerIndex, names, escapeHtml){
+    const wc = playerColor(winnerIndex);
+    return '<div class="panel winner-panel" style="border-color:' + wc + ';background:' + hexToRgba(wc, .14) + ';box-shadow:0 0 0 3px ' + hexToRgba(wc, .22) + ', 0 6px 18px rgba(0,0,0,.45);">' +
+      '<div class="winner-banner" style="color:' + wc + ';text-shadow:0 0 16px ' + hexToRgba(wc, .6) + ';">\uD83C\uDFC6 ' + escapeHtml(names[winnerIndex]) + ' WINS!</div>' +
+    '</div>';
+  }
+  // Was the ball's current credited sinker actually holding a matching card at sink time?
+  // Returns false when we don't have ownership data yet, so we never falsely flag a mismatch.
+  function isMismatch(n){
+    if(!ballSunk[n] || ballSunkBy[n] == null) return false;
+    const owners = ballOwners[n];
+    if(!Array.isArray(owners)) return false;
+    return owners.indexOf(ballSunkBy[n]) === -1;
+  }
   function escapeHtml(s){
     const d = document.createElement("div");
     d.textContent = s;
     return d.innerHTML;
   }
 
-  const STORAGE_KEY = "billiardGameState";
   const app = document.getElementById("app");
 
-  let numPlayers = 0, pins = [], names = [], hands = [], ballSunk = [], winnerIndex = null;
+  let numPlayers = 0, pins = [], names = [], hands = [], ballSunk = [], ballSunkBy = [], ballOwners = [], winnerIndex = null, scores = [];
 
-  // ---- confirm modal ----
-  const confirmOverlay = document.getElementById("confirmOverlay");
-  const confirmText = document.getElementById("confirmText");
-  let pendingConfirmAction = null;
-  document.getElementById("confirmCancel").addEventListener("click", () => {
-    confirmOverlay.classList.remove("show"); pendingConfirmAction = null;
-  });
-  document.getElementById("confirmOk").addEventListener("click", () => {
-    if(pendingConfirmAction) pendingConfirmAction();
-    confirmOverlay.classList.remove("show"); pendingConfirmAction = null;
-  });
-  function askConfirm(msg, action){
-    confirmText.textContent = msg;
-    pendingConfirmAction = action;
-    confirmOverlay.classList.add("show");
+  function getInitials(name){
+    const parts = (name || "").trim().split(/\s+/).filter(Boolean);
+    if(parts.length === 0) return "?";
+    if(parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   }
 
-  // ---- pin modal ----
+  // ---------------------------------------------------------------------
+  // ---- UI feel: haptics, ripples, toasts, confetti, entrance motion ----
+  // ---------------------------------------------------------------------
+  function vibrate(pattern){
+    try{ if(navigator.vibrate) navigator.vibrate(pattern); }catch(e){}
+  }
+  document.addEventListener("pointerdown", (e) => {
+    const el = e.target.closest(".btn, .btn-secondary, .view-btn, .who-sunk-row.selectable, .ball-wrap");
+    if(!el) return;
+    const rect = el.getBoundingClientRect();
+    const size = Math.max(rect.width, rect.height) * 1.15;
+    const span = document.createElement("span");
+    span.className = "ripple";
+    span.style.width = span.style.height = size + "px";
+    span.style.left = (e.clientX - rect.left - size/2) + "px";
+    span.style.top = (e.clientY - rect.top - size/2) + "px";
+    el.appendChild(span);
+    setTimeout(() => span.remove(), 650);
+  });
+  function toast(msg, opts){
+    opts = opts || {};
+    const c = document.getElementById("toastContainer");
+    const el = document.createElement("div");
+    el.className = "toast" + (opts.gold ? " gold" : "");
+    el.textContent = msg;
+    c.appendChild(el);
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add("show")));
+    setTimeout(() => {
+      el.classList.remove("show");
+      setTimeout(() => el.remove(), 320);
+    }, opts.duration || 2600);
+  }
+  function fireConfetti(){
+    const canvas = document.createElement("canvas");
+    canvas.className = "confetti-canvas";
+    document.body.appendChild(canvas);
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    const ctx = canvas.getContext("2d");
+    const colors = ["#e8c04a","#2c8a52","#e8495c","#57a7d8","#f5f5f0"];
+    const particles = Array.from({length:130}, () => ({
+      x: Math.random() * canvas.width,
+      y: -20 - Math.random() * canvas.height * .6,
+      r: 4 + Math.random() * 4,
+      c: colors[Math.floor(Math.random() * colors.length)],
+      vx: (Math.random() - .5) * 3.2,
+      vy: 2.2 + Math.random() * 3,
+      rot: Math.random() * 360,
+      vr: (Math.random() - .5) * 14
+    }));
+    let frame = 0;
+    (function step(){
+      frame++;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      particles.forEach(p => {
+        p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot * Math.PI / 180);
+        ctx.fillStyle = p.c;
+        ctx.fillRect(-p.r, -p.r * .6, p.r * 2, p.r * 1.2);
+        ctx.restore();
+      });
+      if(frame < 170) requestAnimationFrame(step); else canvas.remove();
+    })();
+  }
+  function animateIn(container){
+    Array.from(container.children).forEach((el, i) => {
+      el.style.animation = "riseIn .5s cubic-bezier(.16,1,.3,1) both";
+      el.style.animationDelay = (i * 0.05) + "s";
+    });
+  }
+  const riseInStyle = document.createElement("style");
+  riseInStyle.textContent = "@keyframes riseIn{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:translateY(0);}}";
+  document.head.appendChild(riseInStyle);
+  function shakeModal(overlay){
+    const modal = overlay.querySelector(".modal");
+    modal.classList.remove("shake");
+    void modal.offsetWidth;
+    modal.classList.add("shake");
+  }
+
+  // Newly-sunk balls / a fresh winner pulse, vibrate and toast — whether the change came
+  // from this device's own tap or was just pulled in from another player's phone.
+  let prevBallSunk = null;
+  let prevWinnerIndex = null;
+  let feedbackReady = false;
+  function pulseBall(n){
+    const wraps = document.querySelectorAll("#ballsRack .ball-wrap");
+    const wrap = wraps[n - 1];
+    if(!wrap) return;
+    const ball = wrap.querySelector(".ball");
+    ball.classList.remove("just-sunk");
+    void ball.offsetWidth;
+    ball.classList.add("just-sunk");
+  }
+  function processLiveFeedback(){
+    if(feedbackReady){
+      for(let n = 1; n <= 15; n++){
+        if(ballSunk[n] && !(prevBallSunk && prevBallSunk[n])){
+          pulseBall(n);
+          vibrate(16);
+          const sinker = ballSunkBy[n] != null ? names[ballSunkBy[n]] : null;
+          toast(sinker ? sinker + " sunk ball #" + n : "Ball #" + n + " sunk");
+        }
+      }
+      if(winnerIndex !== null && prevWinnerIndex === null){
+        vibrate([40,30,40,30,150]);
+        fireConfetti();
+        toast("\uD83C\uDFC6 " + names[winnerIndex] + " wins the game!", {duration:4200, gold:true});
+      }
+    }
+    prevBallSunk = ballSunk.slice();
+    prevWinnerIndex = winnerIndex;
+    feedbackReady = true;
+  }
+
+  // ---- sync status badge ----
+  let lastSyncedAt = null;
+  function markSynced(){ lastSyncedAt = Date.now(); updateSyncBadge(); }
+  function updateSyncBadge(){
+    const dot = document.getElementById("syncDot");
+    const label = document.getElementById("syncLabel");
+    if(!dot) return;
+    if(!supabaseClient){
+      dot.className = "sync-dot offline";
+      if(label) label.textContent = "Offline";
+      return;
+    }
+    dot.className = "sync-dot online";
+    if(label){
+      if(lastSyncedAt == null){
+        label.textContent = "Connecting…";
+      } else {
+        const secs = Math.max(0, Math.round((Date.now() - lastSyncedAt) / 1000));
+        label.textContent = secs < 3 ? "Synced" : secs + "s ago";
+      }
+    }
+  }
+  setInterval(updateSyncBadge, 1000);
+
+  // ---- generic backdrop-click-to-close for all overlays ----
+  function closeOnBackdrop(overlay, onClose){
+    overlay.addEventListener("click", (e) => { if(e.target === overlay) onClose(); });
+  }
+
+  // ---- pin modal (dot-style entry backed by a hidden numeric input) ----
   const pinOverlay = document.getElementById("pinOverlay");
   const pinTitle = document.getElementById("pinTitle");
   const pinInput = document.getElementById("pinInput");
+  const pinDots = document.getElementById("pinDots");
   const pinError = document.getElementById("pinError");
   let pinOnSuccess = null;
   document.getElementById("pinCancel").addEventListener("click", closePin);
   document.getElementById("pinSubmit").addEventListener("click", submitPin);
   pinInput.addEventListener("keydown", e => { if(e.key === "Enter") submitPin(); });
+  pinDots.addEventListener("click", () => pinInput.focus());
+  pinInput.addEventListener("input", () => {
+    pinInput.value = pinInput.value.replace(/\D/g, "").slice(0, 4);
+    updatePinDots();
+    if(pinInput.value.length === 4) setTimeout(submitPin, 80);
+  });
+  function updatePinDots(){
+    const dots = pinDots.querySelectorAll(".dot");
+    const len = pinInput.value.length;
+    dots.forEach((d, i) => d.classList.toggle("filled", i < len));
+  }
+  closeOnBackdrop(pinOverlay, closePin);
   function openPin(title, onSuccess){
     pinTitle.textContent = title;
     pinInput.value = "";
     pinError.textContent = "";
+    updatePinDots();
     pinOnSuccess = onSuccess;
     pinOverlay.classList.add("show");
-    setTimeout(() => pinInput.focus(), 50);
+    setTimeout(() => pinInput.focus(), 60);
   }
   function closePin(){
     pinOverlay.classList.remove("show");
@@ -159,18 +468,77 @@
     const val = pinInput.value.trim();
     if(val.length !== 4){
       pinError.textContent = "Enter a 4-digit PIN";
+      shakeModal(pinOverlay);
       return;
     }
     if(pinOnSuccess){
       const ok = pinOnSuccess(val);
       if(ok === false){
         pinError.textContent = "Incorrect PIN";
+        vibrate([30,40,30]);
+        shakeModal(pinOverlay);
         pinInput.value = "";
+        updatePinDots();
         pinInput.focus();
       } else {
+        vibrate(12);
         closePin();
       }
     }
+  }
+
+  // ---- "Who Sunk Ball #" picker ----
+  // Unsunk ball: any player can tap a name to record who sunk it.
+  // Already-sunk ball: view only — shows who's credited (and flags a mismatch in red if
+  // that player's hand didn't actually hold a matching card). Editing is admin-only.
+  const whoSunkOverlay = document.getElementById("whoSunkOverlay");
+  const whoSunkTitle = document.getElementById("whoSunkTitle");
+  const whoSunkList = document.getElementById("whoSunkList");
+  const whoSunkClose = document.getElementById("whoSunkClose");
+  whoSunkClose.addEventListener("click", () => {
+    whoSunkOverlay.classList.remove("show");
+  });
+  closeOnBackdrop(whoSunkOverlay, () => whoSunkOverlay.classList.remove("show"));
+  function openWhoSunk(n){
+    const isSunk = !!ballSunk[n];
+    whoSunkTitle.textContent = "WHO SUNK BALL #" + n + "?";
+    whoSunkClose.textContent = isSunk ? "CLOSE" : "CANCEL";
+    whoSunkList.innerHTML = "";
+    if(numPlayers === 0){
+      whoSunkList.innerHTML = '<div class="who-sunk-empty">No players registered.</div>';
+    } else {
+      const owners = ballOwners[n];
+      for(let p = 0; p < numPlayers; p++){
+        const isCredited = isSunk && ballSunkBy[n] === p;
+        const mismatch = isCredited && Array.isArray(owners) && owners.indexOf(p) === -1;
+        const row = document.createElement(isSunk ? "div" : "button");
+        if(!isSunk) row.type = "button";
+        row.className = "who-sunk-row" + (isSunk ? "" : " selectable") + (isCredited ? " selected" : "");
+        row.innerHTML =
+          '<span class="player-icon" style="margin-right:10px;flex:none;background:' + playerColor(p) + ';">' + getInitials(names[p]) + '</span>' +
+          '<span class="who-sunk-text"><span class="player-name">' + escapeHtml(names[p]) + '</span>' +
+          (mismatch ? '<span class="who-sunk-warn">The ball not belong to you</span>' : '') +
+          '</span>' +
+          (isCredited ? '<span class="who-sunk-check">&check; SUNK</span>' : '');
+        if(!isSunk){
+          row.addEventListener("click", () => {
+            whoSunkOverlay.classList.remove("show");
+            vibrate(14);
+            sinkBallAsPlayer(n, p);
+          });
+        }
+        whoSunkList.appendChild(row);
+      }
+    }
+    const existingHint = whoSunkOverlay.querySelector(".who-sunk-hint");
+    if(existingHint) existingHint.remove();
+    if(isSunk && numPlayers > 0){
+      const hint = document.createElement("div");
+      hint.className = "who-sunk-hint";
+      hint.textContent = "Only the admin can change who's credited for a sunk ball.";
+      whoSunkList.insertAdjacentElement("afterend", hint);
+    }
+    whoSunkOverlay.classList.add("show");
   }
 
   // ---- hand reveal modal ----
@@ -180,8 +548,10 @@
   document.getElementById("hideHandBtn").addEventListener("click", () => {
     handOverlay.classList.remove("show");
   });
-  function openHand(playerName, hand){
+  closeOnBackdrop(handOverlay, () => handOverlay.classList.remove("show"));
+  function openHand(playerName, hand, p){
     handTitle.textContent = playerName + "'s Hand";
+    handTitle.style.color = (p != null) ? playerColor(p) : "var(--gold)";
     handGrid.innerHTML = "";
     if(hand.length === 0){
       handGrid.innerHTML = "<div style='color:var(--muted);padding:10px;'>No cards left</div>";
@@ -195,33 +565,77 @@
     handOverlay.classList.add("show");
   }
 
-  // ---- state load / save ----
-  function loadState(){
+  // ---- state load/save ----
+  // This page reads the live game on every poll. It also performs ONE kind of write: recording
+  // who sunk a ball the first time it's called (see sinkBallAsPlayer below). It never edits an
+  // existing sunk-ball assignment — that stays admin-only.
+  async function loadState(){
+    if(!supabaseClient) return false;
     try{
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if(!raw) return false;
-      const s = JSON.parse(raw);
-      if(!s.inGame) return false;
-      numPlayers = s.numPlayers; pins = s.pins; names = s.names;
-      hands = s.hands; ballSunk = s.ballSunk; winnerIndex = s.winnerIndex;
+      const { data, error } = await supabaseClient
+        .from("games")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if(error || !data || !data.in_game) return false;
+      gameRowId = data.id;
+      markSynced();
+      numPlayers = data.num_players; pins = data.pins || []; names = data.names || [];
+      hands = data.hands || []; ballSunk = data.ball_sunk || [];
+      ballSunkBy = data.ball_sunk_by || new Array(16).fill(null);
+      ballOwners = data.ball_owners || new Array(16).fill(null);
+      winnerIndex = data.winner_index;
+      scores = data.scores || new Array(numPlayers).fill(0);
       return true;
-    }catch(e){ return false; }
+    }catch(e){ console.error("Supabase load failed:", e); return false; }
   }
-  function saveState(){
-    try{
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        numPlayers, pins, names, hands, ballSunk, winnerIndex, inGame: true
-      }));
-    }catch(e){ /* ignore */ }
-  }
-  window.addEventListener("storage", (e) => {
-    if(e.key !== STORAGE_KEY) return;
-    render();
-  });
 
-  function sinkBall(n){
+  // Fields that may not exist yet on an older "games" table. If Supabase reports one of
+  // these columns as missing, we strip ONLY that field and retry — never both at once —
+  // so ball_sunk_by keeps saving even if ball_owners' column is the one that's missing.
+  // Silently dropping both whenever either was missing is what used to make the
+  // "ball doesn't match your hand" warning silently stop persisting.
+  const OPTIONAL_COLUMNS = ["ball_sunk_by", "ball_owners"];
+  function missingColumnField(error){
+    const msg = (error && error.message) || "";
+    return OPTIONAL_COLUMNS.find(f => new RegExp(f, "i").test(msg)) || null;
+  }
+  async function runWithColumnFallback(payload, op){
+    let current = Object.assign({}, payload);
+    for(let attempt = 0; attempt < OPTIONAL_COLUMNS.length + 1; attempt++){
+      const result = await op(current);
+      if(!result.error) return result;
+      const field = missingColumnField(result.error);
+      if(!field || !(field in current)) return result;
+      delete current[field];
+      console.warn("Supabase 'games' table is missing column '" + field + "' — saving without it. Run the migration to add it so this data persists.");
+    }
+    return { error: new Error("Supabase save failed after column fallback") };
+  }
+
+  // Persist a ball-sink update.
+  async function saveSinkUpdate(){
+    if(!supabaseClient || !gameRowId) return;
+    const payload = { hands: hands, ball_sunk: ballSunk, ball_sunk_by: ballSunkBy, ball_owners: ballOwners, winner_index: winnerIndex, scores: scores };
+    try{
+      const { error } = await runWithColumnFallback(payload, p =>
+        supabaseClient.from("games").update(p).eq("id", gameRowId)
+      );
+      if(error) console.error("Supabase update error (player sink):", error);
+      else markSynced();
+    }catch(e){ console.error("Supabase update failed:", e); }
+  }
+
+  // Players can call their own shots the first time a ball is sunk — same card-removal and
+  // winner logic as the admin page. Once a ball is sunk, only the admin page can change credit.
+  async function sinkBallAsPlayer(n, playerIndex){
     if(ballSunk[n] || winnerIndex !== null) return;
     ballSunk[n] = true;
+    ballSunkBy[n] = playerIndex;
+    const owners = [];
+    hands.forEach((hand, idx) => { if(hand.some(c => c.ball === n)) owners.push(idx); });
+    ballOwners[n] = owners;
     hands.forEach(hand => {
       for(let i = hand.length - 1; i >= 0; i--){
         if(hand[i].ball === n) hand.splice(i, 1);
@@ -230,44 +644,91 @@
     for(let p = 0; p < hands.length; p++){
       if(hands[p].length === 0 && winnerIndex === null){
         winnerIndex = p;
+        scores[p] = (scores[p] || 0) + 1;
         break;
       }
     }
-    saveState();
+    await saveSinkUpdate();
     render();
   }
 
-  function render(){
-    if(!loadState()){
+  async function render(){
+    const ok = await loadState();
+    if(!ok){
       app.innerHTML =
-        '<header><h1>BILLIARD CARD GAME</h1><p>PLAYER VIEW</p></header>' +
-        '<div class="panel"><div class="empty-state">No game in progress yet.<br>Ask the host to deal a game on the admin page, then reload this page.</div></div>' +
-        '<footer>Fully offline · No data leaves this device</footer>';
+        '<header><h1 class="display">🎱 BILLIARD CARDS</h1><p>PLAYER VIEW</p></header>' +
+        '<div class="panel"><div class="empty-state"><span class="big">🎱</span>No game in progress yet.<br>Ask the host to deal a game on the admin page — this screen updates automatically once they do.</div></div>' +
+        '<footer>Auto-syncs across every phone at the table</footer>';
       return;
     }
 
+    const sunkCount = ballSunk.filter(Boolean).length;
+    const pct = Math.round((sunkCount / 15) * 100);
     app.innerHTML =
-      '<header><h1>BILLIARD CARD GAME</h1><p>PASS THE PHONE — ENTER YOUR PIN TO VIEW</p></header>' +
-      (winnerIndex !== null ?
-        '<div class="panel"><div class="winner-banner">\uD83C\uDFC6 ' + escapeHtml(names[winnerIndex]) + ' WINS!</div></div>' : '') +
+      '<header>' +
+        '<div class="header-top"><h1 class="display">🎱 BILLIARD CARDS</h1>' +
+          '<span class="sync-badge"><span class="sync-dot" id="syncDot"></span><span id="syncLabel">Connecting…</span></span>' +
+        '</div>' +
+        '<p>PASS THE PHONE — ENTER YOUR PIN TO VIEW</p>' +
+      '</header>' +
       '<div class="panel">' +
-        '<div class="section-title">Ball Rack — tap when a ball is sunk</div>' +
-        '<div class="balls-rack" id="ballsRack"></div>' +
+        '<div class="section-title-row">' +
+          '<div class="section-title">Scoreboard — games won this session</div>' +
+          '<div class="games-played-badge"><span class="games-played-label">Games</span><span class="games-played-value">' + scores.reduce((a,b)=>a+b,0) + '</span></div>' +
+        '</div>' +
+        '<div class="score-rows" id="scoreRows"></div>' +
+      '</div>' +
+      (winnerIndex !== null ? winnerBannerHtml(winnerIndex, names, escapeHtml) : '') +
+      '<div class="panel">' +
+        '<div class="section-title">Ball Rack — tap a ball to record or view who sunk it</div>' +
+        '<div class="progress-track"><div class="progress-fill" style="width:' + pct + '%;"></div></div>' +
+        '<div class="rack-rail"><div class="balls-rack" id="ballsRack"></div></div>' +
       '</div>' +
       '<div class="panel">' +
         '<div class="status-grid">' +
           '<div><span class="label">Players</span><span class="value">' + numPlayers + '</span></div>' +
-          '<div><span class="label">Balls Sunk</span><span class="value">' + ballSunk.filter(Boolean).length + ' / 15</span></div>' +
+          '<div><span class="label">Balls Sunk</span><span class="value">' + sunkCount + ' / 15</span></div>' +
         '</div>' +
       '</div>' +
       '<div class="panel">' +
         '<div class="section-title">Players — enter your PIN to view your hand</div>' +
         '<div class="players-list" id="playersList"></div>' +
       '</div>' +
-      '<footer>Fully offline · PINs are stored only in this browser</footer>';
+      '<footer>Auto-syncs across every phone at the table · PINs stay private to each player</footer>';
+
+    const scoreRows = document.getElementById("scoreRows");
+    const maxScore = Math.max(0, ...scores);
+    const order = names.map((_, i) => i).sort((a, b) => (scores[b] || 0) - (scores[a] || 0));
+    const rowsOfIndices = order.length <= 4
+      ? [order]
+      : [order.slice(0, Math.ceil(order.length / 2)), order.slice(Math.ceil(order.length / 2))];
+    rowsOfIndices.forEach(rowIndices => {
+      if(rowIndices.length === 0) return;
+      const rowEl = document.createElement("div");
+      rowEl.className = "score-row";
+      rowIndices.forEach(i => {
+        const isLeader = maxScore > 0 && scores[i] === maxScore;
+        const cell = document.createElement("div");
+        cell.className = "score-cell" + (isLeader ? " leader" : "");
+        cell.title = names[i] + ": " + (scores[i] || 0) + " win" + (scores[i] === 1 ? "" : "s");
+        const initial = document.createElement("div");
+        initial.className = "score-initial";
+        initial.style.background = playerColor(i);
+        initial.textContent = getInitials(names[i]);
+        const count = document.createElement("div");
+        count.className = "score-count";
+        count.textContent = scores[i] || 0;
+        cell.appendChild(initial);
+        cell.appendChild(count);
+        rowEl.appendChild(cell);
+      });
+      scoreRows.appendChild(rowEl);
+    });
 
     const rack = document.getElementById("ballsRack");
     for(let n = 1; n <= 15; n++){
+      const wrap = document.createElement("div");
+      wrap.className = "ball-wrap";
       const div = document.createElement("div");
       const isSunk = ballSunk[n];
       div.className = "ball " + (ballIsStripe(n) ? "stripe" : "solid") + (isSunk ? " sunk" : "");
@@ -276,12 +737,25 @@
       num.className = "num";
       num.textContent = n;
       div.appendChild(num);
-      if(!isSunk && winnerIndex === null){
-        div.addEventListener("click", () => {
-          askConfirm("Sink ball " + n + "? This discards it from every hand that holds it.", () => sinkBall(n));
-        });
+      wrap.appendChild(div);
+      if(isSunk && ballSunkBy[n] != null && names[ballSunkBy[n]]){
+        const mismatch = isMismatch(n);
+        const badge = document.createElement("span");
+        badge.className = "ball-sunk-badge" + (mismatch ? " mismatch" : "");
+        badge.style.background = playerColor(ballSunkBy[n]);
+        badge.textContent = getInitials(names[ballSunkBy[n]]);
+        if(mismatch) badge.title = names[ballSunkBy[n]] + " didn't actually have a matching card for this ball";
+        wrap.appendChild(badge);
+        if(mismatch){
+          const flag = document.createElement("span");
+          flag.className = "ball-mismatch-flag";
+          flag.textContent = "!";
+          flag.title = "Doesn't match " + names[ballSunkBy[n]] + "'s hand";
+          wrap.appendChild(flag);
+        }
       }
-      rack.appendChild(div);
+      wrap.addEventListener("click", () => openWhoSunk(n));
+      rack.appendChild(wrap);
     }
 
     const list = document.getElementById("playersList");
@@ -289,14 +763,19 @@
       const row = document.createElement("div");
       row.className = "player-row" + (winnerIndex === p ? " winner" : "");
       const left = document.createElement("div");
+      left.className = "player-left";
+      const icon = document.createElement("div");
+      icon.className = "player-icon";
+      if(winnerIndex !== p) icon.style.background = playerColor(p);
+      icon.textContent = getInitials(names[p]);
+      const textWrap = document.createElement("div");
+      textWrap.style.minWidth = "0";
       const name = document.createElement("div");
       name.className = "player-name";
       name.textContent = names[p] + (winnerIndex === p ? " 🏆" : "");
-      const meta = document.createElement("div");
-      meta.className = "player-meta";
-      meta.textContent = hands[p].length + " card" + (hands[p].length === 1 ? "" : "s") + " remaining";
-      left.appendChild(name);
-      left.appendChild(meta);
+      textWrap.appendChild(name);
+      left.appendChild(icon);
+      left.appendChild(textWrap);
       const btn = document.createElement("button");
       btn.className = "view-btn";
       btn.textContent = "VIEW";
@@ -304,7 +783,7 @@
       btn.addEventListener("click", () => {
         openPin(names[p] + "'s PIN", (val) => {
           if(val === pins[p]){
-            openHand(names[p], hands[p]);
+            openHand(names[p], hands[p], p);
             return true;
           }
           return false;
@@ -314,7 +793,12 @@
       row.appendChild(btn);
       list.appendChild(row);
     }
+
+    updateSyncBadge();
+    processLiveFeedback();
+    if(!feedbackAnimated){ animateIn(app); feedbackAnimated = true; }
   }
+  let feedbackAnimated = false;
 
   render();
   setInterval(render, 1500); // pick up changes made on the admin page
