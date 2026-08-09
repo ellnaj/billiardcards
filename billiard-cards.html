@@ -137,6 +137,10 @@
 
   .modal-overlay{position:fixed;inset:0;background:rgba(4,7,5,.72);backdrop-filter:blur(2px);display:none;align-items:flex-end;justify-content:center;padding:0;z-index:50;}
   .modal-overlay.show{display:flex;animation:backdropIn .22s ease;}
+  .modal-overlay.center-sheet{align-items:center;padding:20px;}
+  .modal-overlay.center-sheet .modal{border-radius:22px;border-bottom:1px solid var(--border);animation:none;}
+  .modal-overlay.center-sheet.show .modal{animation:centerPop .3s cubic-bezier(.16,1,.3,1);}
+  @keyframes centerPop{0%{opacity:0;transform:scale(.92);}100%{opacity:1;transform:scale(1);}}
   @keyframes backdropIn{from{opacity:0;}to{opacity:1;}}
   .modal{background:linear-gradient(180deg,var(--panel-hi),var(--panel));border-radius:22px 22px 0 0;padding:26px 20px calc(20px + var(--safe-b));max-width:480px;width:100%;border:1px solid var(--border);border-bottom:none;max-height:82vh;overflow-y:auto;position:relative;box-shadow:0 -14px 40px rgba(0,0,0,.55);}
   .modal-overlay.show .modal{animation:sheetUp .34s cubic-bezier(.16,1,.3,1);}
@@ -250,6 +254,36 @@
   </div>
 </div>
 
+<div class="modal-overlay center-sheet" id="hostGateOverlay">
+  <div class="modal">
+    <h3 id="hostGateTitle">Enter Host PIN</h3>
+    <div class="pin-dots" id="hostGateDots">
+      <span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+    </div>
+    <input class="pin-input" id="hostGateInput" type="tel" inputmode="numeric" maxlength="4" autocomplete="off">
+    <div class="pin-error" id="hostGateError"></div>
+    <div class="pin-hint">Tap the dots to enter the 4-digit host PIN</div>
+    <button class="btn btn-primary" id="hostGateSubmit" style="margin-top:4px;">Unlock</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="hostSettingsOverlay">
+  <div class="modal">
+    <h3>Host Settings</h3>
+    <button class="btn btn-primary" id="hostSettingsChangePin" style="margin-top:6px;">🔒 CHANGE HOST PIN</button>
+    <div class="section-title" style="margin-top:18px;">Auto-lock after inactivity</div>
+    <select id="hostTimeoutSelect">
+      <option value="1">1 minute</option>
+      <option value="5">5 minutes</option>
+      <option value="10">10 minutes</option>
+      <option value="15">15 minutes</option>
+      <option value="30">30 minutes</option>
+      <option value="0">Never</option>
+    </select>
+    <button class="btn-secondary" id="hostSettingsClose" style="margin-top:16px;width:100%;">CLOSE</button>
+  </div>
+</div>
+
 <div class="modal-overlay" id="handOverlay">
   <div class="modal">
     <h3 id="handTitle">Player</h3>
@@ -294,16 +328,18 @@
   let gameRowId = null; // id of the current row in the "games" table
 
   // ---- Host PIN gate ----
-  // Requires a 4-digit PIN to open this admin page at all, kept in Supabase (table
-  // "app_settings", single row id=1, column admin_pin) so it can be changed without
-  // touching code — either in-app via the lock button on the game screen, or directly
-  // by editing that row's admin_pin value in the Supabase table editor.
+  // Requires a 4-digit PIN to open this admin page at all, and auto re-locks after a
+  // period of inactivity. Both the PIN and the timeout length are kept in Supabase
+  // (table "app_settings", single row id=1, columns admin_pin + session_timeout_minutes)
+  // so they can be changed without touching code — either in-app via the ⚙️ Settings
+  // button on the game screen, or directly by editing that row in the Supabase table editor.
   //
   // Run this once in the Supabase SQL editor to enable it:
   //
   //   create table if not exists app_settings (
   //     id bigint primary key,
-  //     admin_pin text
+  //     admin_pin text,
+  //     session_timeout_minutes integer default 5
   //   );
   //   alter table app_settings enable row level security;
   //   create policy "Allow anon read app_settings" on app_settings for select using (true);
@@ -313,45 +349,156 @@
   // If that table doesn't exist yet (or Supabase is unreachable), the gate is skipped
   // entirely rather than locking the host out of their own tool.
   const HOST_PIN_SESSION_KEY = "billiardHost_unlocked";
+  const HOST_LAST_ACTIVITY_KEY = "billiardHost_lastActivity";
   let hostPin = null; // currently-active host PIN, once loaded
+  let hostTimeoutMinutes = 5; // minutes of inactivity before auto re-lock; 0 = never
 
-  async function loadHostPin(){
+  function markHostActivity(){
+    try{ sessionStorage.setItem(HOST_LAST_ACTIVITY_KEY, String(Date.now())); }catch(e){}
+  }
+  function markHostUnlocked(){
+    try{
+      sessionStorage.setItem(HOST_PIN_SESSION_KEY, "1");
+      sessionStorage.setItem(HOST_LAST_ACTIVITY_KEY, String(Date.now()));
+    }catch(e){}
+  }
+  function hostSessionStillValid(){
+    let unlocked = false, lastTs = 0;
+    try{
+      unlocked = sessionStorage.getItem(HOST_PIN_SESSION_KEY) === "1";
+      lastTs = parseInt(sessionStorage.getItem(HOST_LAST_ACTIVITY_KEY) || "0", 10);
+    }catch(e){}
+    if(!unlocked) return false;
+    if(!hostTimeoutMinutes || hostTimeoutMinutes <= 0) return true; // "Never" timeout
+    return (Date.now() - lastTs) < hostTimeoutMinutes * 60000;
+  }
+  // Any tap/click/keypress/scroll while unlocked resets the inactivity clock. Throttled
+  // so it's not writing to sessionStorage on every pixel of scroll.
+  let lastActivityMarkAt = 0;
+  function handleHostActivityEvent(){
+    if(!hostPin) return; // gate not configured — nothing to keep alive
+    const now = Date.now();
+    if(now - lastActivityMarkAt < 5000) return;
+    lastActivityMarkAt = now;
+    markHostActivity();
+  }
+  ["click","touchstart","keydown","mousemove","scroll"].forEach(evt => {
+    document.addEventListener(evt, handleHostActivityEvent, {passive:true});
+  });
+  // Auto re-lock: checks periodically whether the inactivity window has elapsed.
+  setInterval(() => {
+    if(!hostPin) return; // gate not configured
+    if(hostGateOverlay.classList.contains("show")) return; // already prompting
+    if(!hostSessionStillValid()) lockHostSession();
+  }, 15000);
+  function lockHostSession(){
+    try{ sessionStorage.removeItem(HOST_PIN_SESSION_KEY); }catch(e){}
+    openHostGate("Session Locked — Enter Host PIN", (val) => {
+      if(val !== hostPin) return false;
+      markHostUnlocked();
+      return true;
+    });
+  }
+
+  // ---- dedicated centered, no-cancel PIN box used only for the host gate ----
+  const hostGateOverlay = document.getElementById("hostGateOverlay");
+  const hostGateTitle = document.getElementById("hostGateTitle");
+  const hostGateInput = document.getElementById("hostGateInput");
+  const hostGateDots = document.getElementById("hostGateDots");
+  const hostGateError = document.getElementById("hostGateError");
+  let hostGateOnSuccess = null;
+  document.getElementById("hostGateSubmit").addEventListener("click", submitHostGate);
+  hostGateInput.addEventListener("keydown", e => { if(e.key === "Enter") submitHostGate(); });
+  hostGateDots.addEventListener("click", () => hostGateInput.focus());
+  hostGateInput.addEventListener("input", () => {
+    hostGateInput.value = hostGateInput.value.replace(/\D/g, "").slice(0, 4);
+    updateHostGateDots();
+    if(hostGateInput.value.length === 4) setTimeout(submitHostGate, 80);
+  });
+  function updateHostGateDots(){
+    const dots = hostGateDots.querySelectorAll(".dot");
+    const len = hostGateInput.value.length;
+    dots.forEach((d, i) => d.classList.toggle("filled", i < len));
+  }
+  function openHostGate(title, onSuccess){
+    hostGateTitle.textContent = title;
+    hostGateInput.value = "";
+    hostGateError.textContent = "";
+    updateHostGateDots();
+    hostGateOnSuccess = onSuccess;
+    hostGateOverlay.classList.add("show");
+    setTimeout(() => hostGateInput.focus(), 60);
+  }
+  function submitHostGate(){
+    const val = hostGateInput.value.trim();
+    if(val.length !== 4){
+      hostGateError.textContent = "Enter a 4-digit PIN";
+      shakeModal(hostGateOverlay);
+      return;
+    }
+    if(hostGateOnSuccess){
+      const ok = hostGateOnSuccess(val);
+      if(ok === false){
+        hostGateError.textContent = "Incorrect PIN";
+        vibrate([30,40,30]);
+        shakeModal(hostGateOverlay);
+        hostGateInput.value = "";
+        updateHostGateDots();
+        hostGateInput.focus();
+      } else {
+        vibrate(12);
+        hostGateOverlay.classList.remove("show");
+        hostGateOnSuccess = null;
+      }
+    }
+  }
+
+  async function loadHostSettings(){
     if(!supabaseClient) return undefined;
     try{
-      const { data, error } = await supabaseClient.from("app_settings").select("admin_pin").eq("id", 1).maybeSingle();
+      const { data, error } = await supabaseClient.from("app_settings").select("admin_pin, session_timeout_minutes").eq("id", 1).maybeSingle();
       if(error){ console.error("Supabase app_settings load failed — run the migration above to enable the host PIN lock:", error); return undefined; }
-      return data ? data.admin_pin : null; // null = table exists but no PIN set yet
-    }catch(e){ console.error("loadHostPin failed:", e); return undefined; }
+      if(!data || !data.admin_pin) return null; // table exists but no PIN set yet
+      return {
+        adminPin: data.admin_pin,
+        timeoutMinutes: (data.session_timeout_minutes === null || data.session_timeout_minutes === undefined) ? 5 : data.session_timeout_minutes
+      };
+    }catch(e){ console.error("loadHostSettings failed:", e); return undefined; }
   }
-  async function saveHostPin(pin){
+  // Pass either argument as undefined to leave that column untouched.
+  async function saveHostSettings(pin, timeoutMinutes){
     if(!supabaseClient) return false;
     try{
-      const { error } = await supabaseClient.from("app_settings").upsert({ id: 1, admin_pin: pin });
+      const payload = { id: 1 };
+      if(pin !== undefined) payload.admin_pin = pin;
+      if(timeoutMinutes !== undefined) payload.session_timeout_minutes = timeoutMinutes;
+      const { error } = await supabaseClient.from("app_settings").upsert(payload);
       if(error){ console.error("Supabase app_settings save failed:", error); return false; }
       return true;
-    }catch(e){ console.error("saveHostPin failed:", e); return false; }
+    }catch(e){ console.error("saveHostSettings failed:", e); return false; }
   }
 
   // First-time setup: no PIN configured yet, so let the admin create one now.
   function promptCreateHostPin(){
-    openPin("Create your Host PIN", (val) => {
+    openHostGate("Create your Host PIN", (val) => {
       setTimeout(() => confirmCreateHostPin(val), 50);
       return true;
     });
   }
   function confirmCreateHostPin(val){
-    openPin("Confirm your Host PIN", (confirmVal) => {
+    openHostGate("Confirm your Host PIN", (confirmVal) => {
       if(confirmVal !== val) return false;
       hostPin = confirmVal;
-      try{ sessionStorage.setItem(HOST_PIN_SESSION_KEY, "1"); }catch(e){}
-      saveHostPin(confirmVal);
+      hostTimeoutMinutes = 5;
+      markHostUnlocked();
+      saveHostSettings(confirmVal, 5);
       setTimeout(boot, 50);
       return true;
     });
   }
 
-  // Reachable any time from the lock button on the game screen — requires the current
-  // PIN before a new one can be set, same pattern as a player's own changePin().
+  // Reachable from Host Settings — requires the current PIN before a new one can be
+  // set, same pattern as a player's own changePin().
   function changeHostPin(){
     openPin("Enter CURRENT Host PIN", (oldVal) => {
       if(oldVal !== hostPin) return false;
@@ -361,7 +508,7 @@
             openPin("Confirm NEW Host PIN", (confirmVal) => {
               if(confirmVal !== newVal) return false;
               hostPin = confirmVal;
-              saveHostPin(confirmVal);
+              saveHostSettings(confirmVal, undefined);
               toast("Host PIN updated");
               return true;
             });
@@ -373,11 +520,32 @@
     });
   }
 
+  // ---- Host Settings modal: change PIN, adjust auto-lock timeout ----
+  const hostSettingsOverlay = document.getElementById("hostSettingsOverlay");
+  const hostTimeoutSelect = document.getElementById("hostTimeoutSelect");
+  document.getElementById("hostSettingsChangePin").addEventListener("click", () => {
+    hostSettingsOverlay.classList.remove("show");
+    setTimeout(changeHostPin, 200);
+  });
+  document.getElementById("hostSettingsClose").addEventListener("click", () => {
+    hostSettingsOverlay.classList.remove("show");
+  });
+  closeOnBackdrop(hostSettingsOverlay, () => hostSettingsOverlay.classList.remove("show"));
+  hostTimeoutSelect.addEventListener("change", () => {
+    const minutes = parseInt(hostTimeoutSelect.value, 10);
+    hostTimeoutMinutes = minutes;
+    markHostActivity();
+    saveHostSettings(undefined, minutes);
+    toast(minutes > 0 ? ("Auto-lock set to " + minutes + " min") : "Auto-lock turned off");
+  });
+  function openHostSettings(){
+    hostTimeoutSelect.value = String(hostTimeoutMinutes);
+    hostSettingsOverlay.classList.add("show");
+  }
+
   // Gate the whole app behind the host PIN before boot() ever runs.
   async function gateEntry(){
-    let already = false;
-    try{ already = sessionStorage.getItem(HOST_PIN_SESSION_KEY) === "1"; }catch(e){}
-    const result = await loadHostPin();
+    const result = await loadHostSettings();
     if(result === undefined){
       boot(); // app_settings missing/unreachable — don't lock the host out
       return;
@@ -386,11 +554,16 @@
       promptCreateHostPin();
       return;
     }
-    hostPin = result;
-    if(already){ boot(); return; }
-    openPin("Enter Host PIN", (val) => {
+    hostPin = result.adminPin;
+    hostTimeoutMinutes = result.timeoutMinutes;
+    if(hostSessionStillValid()){
+      markHostActivity();
+      boot();
+      return;
+    }
+    openHostGate("Enter Host PIN", (val) => {
       if(val !== hostPin) return false;
-      try{ sessionStorage.setItem(HOST_PIN_SESSION_KEY, "1"); }catch(e){}
+      markHostUnlocked();
       setTimeout(boot, 50);
       return true;
     });
@@ -1309,7 +1482,7 @@
     app.innerHTML =
       '<header>' +
         '<div class="header-top">' +
-          '<button class="pin-change-btn" id="hostPinBtn" style="position:absolute;left:0;" title="Change Host PIN">🔒</button>' +
+          '<button class="pin-change-btn" id="hostSettingsBtn" style="position:absolute;left:0;" title="Host Settings">⚙️</button>' +
           '<h1 class="display">🎱 BILLIARD CARDS</h1>' +
           '<span class="sync-badge"><span class="sync-dot" id="syncDot"></span><span id="syncLabel">Connecting…</span></span>' +
         '</div>' +
@@ -1485,7 +1658,7 @@
     document.getElementById("resetBtn").addEventListener("click", () => {
       askReset();
     });
-    document.getElementById("hostPinBtn").addEventListener("click", changeHostPin);
+    document.getElementById("hostSettingsBtn").addEventListener("click", openHostSettings);
 
     updateSyncBadge();
     processLiveFeedback();
