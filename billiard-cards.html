@@ -155,7 +155,7 @@
   .pin-error{color:var(--red);font-size:.8rem;text-align:center;min-height:1.1em;margin-top:6px;}
   .pin-hint{text-align:center;color:var(--muted);font-size:.72rem;margin-top:2px;}
 
-  .name-input{width:100%;padding:14px;font-size:1.05rem;border-radius:var(--radius-sm);border:1px solid #303a33;background:#0d1210;color:var(--white);font-family:inherit;}
+  .name-input{width:100%;padding:14px;font-size:1.05rem;border-radius:var(--radius-sm);border:1px solid #303a33;background:#0d1210;color:var(--gold);font-family:inherit;text-align:center;font-weight:700;letter-spacing:.5px;}
 
   .who-sunk-list{display:flex;flex-direction:column;gap:8px;max-height:50vh;overflow-y:auto;}
   .who-sunk-row{position:relative;overflow:hidden;display:flex;align-items:center;width:100%;text-align:left;background:#0d1210;border:1px solid var(--border);border-radius:var(--radius-sm);padding:11px 12px;color:var(--white);font-size:.95rem;font-weight:700;font-family:inherit;cursor:pointer;transition:transform .12s ease,border-color .15s ease;}
@@ -292,6 +292,109 @@
     console.error("Supabase init failed — set SUPABASE_URL / SUPABASE_ANON_KEY:", e);
   }
   let gameRowId = null; // id of the current row in the "games" table
+
+  // ---- Host PIN gate ----
+  // Requires a 4-digit PIN to open this admin page at all, kept in Supabase (table
+  // "app_settings", single row id=1, column admin_pin) so it can be changed without
+  // touching code — either in-app via the lock button on the game screen, or directly
+  // by editing that row's admin_pin value in the Supabase table editor.
+  //
+  // Run this once in the Supabase SQL editor to enable it:
+  //
+  //   create table if not exists app_settings (
+  //     id bigint primary key,
+  //     admin_pin text
+  //   );
+  //   alter table app_settings enable row level security;
+  //   create policy "Allow anon read app_settings" on app_settings for select using (true);
+  //   create policy "Allow anon write app_settings" on app_settings for insert with check (true);
+  //   create policy "Allow anon update app_settings" on app_settings for update using (true);
+  //
+  // If that table doesn't exist yet (or Supabase is unreachable), the gate is skipped
+  // entirely rather than locking the host out of their own tool.
+  const HOST_PIN_SESSION_KEY = "billiardHost_unlocked";
+  let hostPin = null; // currently-active host PIN, once loaded
+
+  async function loadHostPin(){
+    if(!supabaseClient) return undefined;
+    try{
+      const { data, error } = await supabaseClient.from("app_settings").select("admin_pin").eq("id", 1).maybeSingle();
+      if(error){ console.error("Supabase app_settings load failed — run the migration above to enable the host PIN lock:", error); return undefined; }
+      return data ? data.admin_pin : null; // null = table exists but no PIN set yet
+    }catch(e){ console.error("loadHostPin failed:", e); return undefined; }
+  }
+  async function saveHostPin(pin){
+    if(!supabaseClient) return false;
+    try{
+      const { error } = await supabaseClient.from("app_settings").upsert({ id: 1, admin_pin: pin });
+      if(error){ console.error("Supabase app_settings save failed:", error); return false; }
+      return true;
+    }catch(e){ console.error("saveHostPin failed:", e); return false; }
+  }
+
+  // First-time setup: no PIN configured yet, so let the admin create one now.
+  function promptCreateHostPin(){
+    openPin("Create your Host PIN", (val) => {
+      setTimeout(() => confirmCreateHostPin(val), 50);
+      return true;
+    });
+  }
+  function confirmCreateHostPin(val){
+    openPin("Confirm your Host PIN", (confirmVal) => {
+      if(confirmVal !== val) return false;
+      hostPin = confirmVal;
+      try{ sessionStorage.setItem(HOST_PIN_SESSION_KEY, "1"); }catch(e){}
+      saveHostPin(confirmVal);
+      setTimeout(boot, 50);
+      return true;
+    });
+  }
+
+  // Reachable any time from the lock button on the game screen — requires the current
+  // PIN before a new one can be set, same pattern as a player's own changePin().
+  function changeHostPin(){
+    openPin("Enter CURRENT Host PIN", (oldVal) => {
+      if(oldVal !== hostPin) return false;
+      setTimeout(() => {
+        openPin("Enter NEW Host PIN", (newVal) => {
+          setTimeout(() => {
+            openPin("Confirm NEW Host PIN", (confirmVal) => {
+              if(confirmVal !== newVal) return false;
+              hostPin = confirmVal;
+              saveHostPin(confirmVal);
+              toast("Host PIN updated");
+              return true;
+            });
+          }, 50);
+          return true;
+        });
+      }, 50);
+      return true;
+    });
+  }
+
+  // Gate the whole app behind the host PIN before boot() ever runs.
+  async function gateEntry(){
+    let already = false;
+    try{ already = sessionStorage.getItem(HOST_PIN_SESSION_KEY) === "1"; }catch(e){}
+    const result = await loadHostPin();
+    if(result === undefined){
+      boot(); // app_settings missing/unreachable — don't lock the host out
+      return;
+    }
+    if(result === null){
+      promptCreateHostPin();
+      return;
+    }
+    hostPin = result;
+    if(already){ boot(); return; }
+    openPin("Enter Host PIN", (val) => {
+      if(val !== hostPin) return false;
+      try{ sessionStorage.setItem(HOST_PIN_SESSION_KEY, "1"); }catch(e){}
+      setTimeout(boot, 50);
+      return true;
+    });
+  }
 
   const SUITS = [
     {symbol:"♠",color:0},{symbol:"♥",color:1},
@@ -536,6 +639,19 @@
   function clearState(){
     saveState(false);
   }
+
+  // Wipes every row from the "entries" (daily check-in) table. Used by both reset paths
+  // so a fresh game — whether starting over or keeping the same players — also clears out
+  // who's checked in, letting everyone check in again for the new game.
+  async function clearAllEntries(){
+    if(!supabaseClient) return;
+    try{
+      const { error } = await supabaseClient.from("entries").delete().not("id", "is", null);
+      if(error) console.error("Supabase entries clear failed:", error);
+      else entriesToday = {};
+    }catch(e){ console.error("clearAllEntries failed:", e); }
+  }
+
   // Load the most recent game row from Supabase on page load
   async function loadStateFromSupabase(){
     if(!supabaseClient) return false;
@@ -560,8 +676,29 @@
       winnerIndex = data.winner_index;
       scores = data.scores || new Array(numPlayers).fill(0);
       joinedPlayers = data.joined_players || [];
+      lastSeen = data.last_seen || [];
       return true;
     }catch(e){ console.error("Supabase load failed:", e); return false; }
+  }
+
+  // Loads today's check-in entries (written by the player-facing page on successful
+  // Name+PIN login) so the admin can see, via tooltip on each player's icon, who has
+  // actually checked in today. Read-only — never writes here.
+  async function loadEntriesToday(){
+    if(!supabaseClient) return;
+    const now = new Date();
+    const pad = n => String(n).padStart(2, "0");
+    const entryDate = now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate());
+    try{
+      const { data, error } = await supabaseClient
+        .from("entries")
+        .select("player_name, entry_time")
+        .eq("entry_date", entryDate);
+      if(error){ console.error("Supabase entries load failed:", error); return; }
+      const next = {};
+      (data || []).forEach(row => { next[row.player_name] = row.entry_time; });
+      entriesToday = next;
+    }catch(e){ console.error("loadEntriesToday failed:", e); }
   }
 
   const app = document.getElementById("app");
@@ -757,7 +894,26 @@
     });
   }
 
-  // ---- rename modal (replaces window.prompt for a nicer in-app feel) ----
+  // Removes this player's row(s) from the "entries" (daily check-in) table, so their
+  // phone can check in again — e.g. if they checked in by mistake or need a fresh entry.
+  // Only touches the entries table; doesn't change their PIN, hand, or "joined" status.
+  async function logoutPlayer(p){
+    if(!supabaseClient) return;
+    const nm = names[p];
+    try{
+      const { error } = await supabaseClient.from("entries").delete().eq("player_name", nm);
+      if(error){
+        console.error("Supabase entries delete failed:", error);
+        toast("Couldn't log out " + nm);
+        return;
+      }
+      delete entriesToday[nm];
+      toast(nm + " logged out — they can check in again");
+      renderGame(true);
+    }catch(e){ console.error("logoutPlayer failed:", e); }
+  }
+
+
   const renameOverlay = document.getElementById("renameOverlay");
   const renameInput = document.getElementById("renameInput");
   let renamingIndex = null;
@@ -816,6 +972,16 @@
   let winnerIndex = null;
   let scores = [];    // wins per player, across "New Game" replays this session
   let joinedPlayers = []; // true per player index once they've confirmed name+PIN on their own phone
+  let lastSeen = []; // ISO timestamp per player index of their last heartbeat from their own phone
+  const CONNECTION_TIMEOUT_MS = 10000; // no heartbeat within this window = treated as disconnected
+  function isPlayerConnected(p){
+    const ts = lastSeen[p];
+    if(!ts) return false;
+    const t = new Date(ts).getTime();
+    if(isNaN(t)) return false;
+    return (Date.now() - t) < CONNECTION_TIMEOUT_MS;
+  }
+  let entriesToday = {}; // player name -> "HH:MM:SS" check-in time for today, for the admin's own info
   let setupStep = 0;  // index of player currently setting PIN
   let carryOver = null; // {names, pins} snapshot offered for reuse when "Keep Players" is chosen
 
@@ -830,15 +996,19 @@
     '<div class="panel skeleton" style="height:220px;"></div>' +
     '<div class="panel skeleton" style="height:120px;"></div>';
 
-  (async function init(){
+  // Runs once the host PIN gate (see gateEntry, defined near the top) has let the admin
+  // through — either immediately if already unlocked this session, or right after they
+  // enter/create the correct PIN.
+  async function boot(){
     const loaded = await loadStateFromSupabase();
+    await loadEntriesToday();
     if(loaded){
       renderGame();
     } else {
       renderSetupCount();
     }
     startLivePolling();
-  })();
+  }
 
   // ---------- keep the admin screen in sync with changes players make on their own page ----------
   function anyModalOpen(){
@@ -850,7 +1020,7 @@
       whoSunkOverlay.classList.contains("show");
   }
   function gameSnapshot(){
-    return JSON.stringify({ numPlayers, names, pins, hands, ballSunk, ballSunkBy, ballOwners, winnerIndex, scores });
+    return JSON.stringify({ numPlayers, names, pins, hands, ballSunk, ballSunkBy, ballOwners, winnerIndex, scores, joinedPlayers, entriesToday, lastSeen });
   }
   function startLivePolling(){
     setInterval(async () => {
@@ -861,10 +1031,27 @@
       const before = gameSnapshot();
       const loaded = await loadStateFromSupabase();
       if(!loaded) return;
+      await loadEntriesToday();
       if(gameSnapshot() !== before){
         renderGame(true);
       }
     }, 2000);
+    // A player can go quiet (tab closed, signal lost) without any new data ever arriving —
+    // the poll above only re-renders when the fetched data actually changes, so it alone
+    // would never notice a stale heartbeat. This ticks independently just to re-evaluate
+    // "connected" against the clock and flip dots off once a player's heartbeat goes stale.
+    setInterval(refreshConnectionDots, 1000);
+  }
+  function refreshConnectionDots(){
+    if(currentView !== "game") return;
+    document.querySelectorAll("#playersList .joined-dot[data-player-index]").forEach(dot => {
+      const p = Number(dot.dataset.playerIndex);
+      const connected = isPlayerConnected(p);
+      dot.classList.toggle("joined", connected);
+      dot.title = connected
+        ? names[p] + " is connected"
+        : (joinedPlayers[p] ? names[p] + " has disconnected" : names[p] + " hasn't opened their view yet");
+    });
   }
 
   // ---------- SETUP: choose player count ----------
@@ -1098,6 +1285,7 @@
     setupStep = 0;
     carryOver = null;
     clearState();
+    clearAllEntries();
     renderSetupCount();
   }
 
@@ -1109,6 +1297,7 @@
     ballOwners = [];
     winnerIndex = null;
     clearState();
+    clearAllEntries();
     renderSetupCount();
   }
 
@@ -1119,7 +1308,9 @@
     const pct = Math.round((sunkCount / 15) * 100);
     app.innerHTML =
       '<header>' +
-        '<div class="header-top"><h1 class="display">🎱 BILLIARD CARDS</h1>' +
+        '<div class="header-top">' +
+          '<button class="pin-change-btn" id="hostPinBtn" style="position:absolute;left:0;" title="Change Host PIN">🔒</button>' +
+          '<h1 class="display">🎱 BILLIARD CARDS</h1>' +
           '<span class="sync-badge"><span class="sync-dot" id="syncDot"></span><span id="syncLabel">Connecting…</span></span>' +
         '</div>' +
         '<p>PASS THE PHONE — ENTER YOUR PIN TO VIEW</p>' +
@@ -1144,7 +1335,7 @@
         '</div>' +
       '</div>' +
       '<div class="panel">' +
-        '<div class="section-title">Players — green dot means they\u2019ve joined on their phone</div>' +
+        '<div class="section-title">Players — green dot means they\u2019re currently connected</div>' +
         '<div class="players-list" id="playersList"></div>' +
       '</div>' +
       '<div class="btn-row">' +
@@ -1203,9 +1394,14 @@
       icon.className = "player-icon";
       if(winnerIndex !== p) icon.style.background = playerColor(p);
       icon.textContent = getInitials(names[p]);
+      icon.title = entriesToday[names[p]] ? names[p] + " checked in today at " + entriesToday[names[p]] : names[p] + " hasn't checked in today";
       const joinedDot = document.createElement("span");
-      joinedDot.className = "joined-dot" + (joinedPlayers[p] ? " joined" : "");
-      joinedDot.title = joinedPlayers[p] ? names[p] + " has joined on their phone" : names[p] + " hasn't opened their view yet";
+      joinedDot.dataset.playerIndex = String(p);
+      const connectedNow = isPlayerConnected(p);
+      joinedDot.className = "joined-dot" + (connectedNow ? " joined" : "");
+      joinedDot.title = connectedNow
+        ? names[p] + " is connected"
+        : (joinedPlayers[p] ? names[p] + " has disconnected" : names[p] + " hasn't opened their view yet");
       iconWrap.appendChild(icon);
       iconWrap.appendChild(joinedDot);
       const textWrap = document.createElement("div");
@@ -1237,9 +1433,17 @@
       pinBtn.title = "Change " + names[p] + "'s PIN";
       pinBtn.textContent = "🔑";
       pinBtn.addEventListener("click", () => changePin(p));
+      const logoutBtn = document.createElement("button");
+      logoutBtn.className = "pin-change-btn";
+      logoutBtn.title = "Log out " + names[p] + " — clears their check-in so they can check in again";
+      logoutBtn.textContent = "🚪";
+      logoutBtn.addEventListener("click", () => {
+        askConfirm("Log out " + names[p] + "? This clears their check-in so they'll need to check in again.", () => logoutPlayer(p));
+      });
       const actions = document.createElement("div");
       actions.className = "player-actions";
       actions.appendChild(pinBtn);
+      actions.appendChild(logoutBtn);
       actions.appendChild(btn);
       row.appendChild(left);
       row.appendChild(actions);
@@ -1281,12 +1485,15 @@
     document.getElementById("resetBtn").addEventListener("click", () => {
       askReset();
     });
+    document.getElementById("hostPinBtn").addEventListener("click", changeHostPin);
 
     updateSyncBadge();
     processLiveFeedback();
     if(!keepScroll) animateIn(app);
     if(keepScroll) window.scrollTo(0, scrollY);
   }
+
+  gateEntry();
 })();
 </script>
 </body>

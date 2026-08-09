@@ -294,7 +294,7 @@
 
   const app = document.getElementById("app");
 
-  let numPlayers = 0, pins = [], names = [], hands = [], ballSunk = [], ballSunkBy = [], ballOwners = [], winnerIndex = null, scores = [], joinedPlayers = [];
+  let numPlayers = 0, pins = [], names = [], hands = [], ballSunk = [], ballSunkBy = [], ballOwners = [], winnerIndex = null, scores = [], joinedPlayers = [], lastSeen = [];
 
   // ---- who's holding this phone right now ----
   let loggedIn = false, myPlayerIndex = null;
@@ -598,6 +598,8 @@
     vibrate(12);
     loginOverlay.classList.remove("show");
     markPlayerJoined(idx);
+    recordDailyEntry(nameVal);
+    startHeartbeat();
     render();
   }
 
@@ -617,6 +619,7 @@
       myPlayerIndex = idx;
       loginOverlay.classList.remove("show");
       markPlayerJoined(idx);
+      startHeartbeat();
     }
   }
 
@@ -723,6 +726,7 @@
       winnerIndex = data.winner_index;
       scores = data.scores || new Array(numPlayers).fill(0);
       joinedPlayers = data.joined_players || [];
+      lastSeen = data.last_seen || [];
       return true;
     }catch(e){ console.error("Supabase load failed:", e); return false; }
   }
@@ -732,7 +736,7 @@
   // so ball_sunk_by keeps saving even if ball_owners' column is the one that's missing.
   // Silently dropping both whenever either was missing is what used to make the
   // "ball doesn't match your hand" warning silently stop persisting.
-  const OPTIONAL_COLUMNS = ["ball_sunk_by", "ball_owners", "joined_players"];
+  const OPTIONAL_COLUMNS = ["ball_sunk_by", "ball_owners", "joined_players", "last_seen"];
   function missingColumnField(error){
     const msg = (error && error.message) || "";
     return OPTIONAL_COLUMNS.find(f => new RegExp(f, "i").test(msg)) || null;
@@ -764,6 +768,64 @@
       if(error) console.error("Supabase update error (joined flag):", error);
       else markSynced();
     }catch(e){ console.error("Supabase update failed (joined flag):", e); }
+  }
+
+  // ---- presence heartbeat: lets the admin page know this player is actively connected ----
+  // Writes this player's current timestamp into last_seen[idx] so the admin can tell a
+  // player who's still on the page apart from one who joined earlier but has since closed
+  // the tab or lost signal — the admin treats a heartbeat older than ~10s as disconnected.
+  let heartbeatTimer = null;
+  async function sendHeartbeat(){
+    if(!supabaseClient || !gameRowId || myPlayerIndex === null) return;
+    lastSeen[myPlayerIndex] = new Date().toISOString();
+    const payload = { last_seen: lastSeen };
+    try{
+      const { error } = await runWithColumnFallback(payload, p =>
+        supabaseClient.from("games").update(p).eq("id", gameRowId)
+      );
+      if(error) console.error("Supabase update error (heartbeat):", error);
+    }catch(e){ console.error("Supabase update failed (heartbeat):", e); }
+  }
+  function startHeartbeat(){
+    if(heartbeatTimer) return;
+    sendHeartbeat();
+    heartbeatTimer = setInterval(sendHeartbeat, 6000);
+  }
+  function stopHeartbeat(){
+    if(heartbeatTimer){ clearInterval(heartbeatTimer); heartbeatTimer = null; }
+  }
+  document.addEventListener("visibilitychange", () => {
+    if(document.visibilityState === "visible" && loggedIn) sendHeartbeat();
+  });
+
+  // Records a daily check-in entry the moment a Name+PIN login succeeds. Relies on a
+  // unique(player_name, entry_date) constraint on the "entries" table to block duplicate
+  // check-ins for the same player on the same day — if that constraint rejects the insert,
+  // we simply tell the player they've already checked in today instead of erroring.
+  async function recordDailyEntry(nameVal){
+    if(!supabaseClient) return;
+    const now = new Date();
+    const pad = n => String(n).padStart(2, "0");
+    const entryDate = now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate());
+    const entryTime = pad(now.getHours()) + ":" + pad(now.getMinutes()) + ":" + pad(now.getSeconds());
+    try{
+      const { error } = await supabaseClient
+        .from("entries")
+        .insert({ player_name: nameVal, entry_date: entryDate, entry_time: entryTime });
+      if(error){
+        const isDuplicate = error.code === "23505" || /duplicate key|already exists/i.test(error.message || "");
+        if(isDuplicate){
+          toast("You have already checked in today.", {duration:2600});
+          // Give the toast a moment to be read, then close the tab. Note: browsers only
+          // allow a script to close a tab it opened itself (e.g. via window.open, or a
+          // link with target="_blank"); if this page was opened as a normal navigation,
+          // window.close() is silently ignored and the player just sees the message.
+          setTimeout(() => { window.close(); }, 2600);
+        } else {
+          console.error("Supabase entries insert failed:", error);
+        }
+      }
+    }catch(e){ console.error("recordDailyEntry failed:", e); }
   }
 
   // Persist a ball-sink update.
@@ -807,10 +869,50 @@
   async function render(){
     const ok = await loadState();
     if(ok){
+      // The admin may have dealt a brand new game (in_game stays true, but the roster of
+      // names/PINs changes) since this device last logged in. Re-check the saved
+      // credentials against the CURRENT roster on every poll — not just once at login —
+      // so a stale session doesn't keep showing this device someone else's hand, and a
+      // no-longer-matching name/PIN drops back to the "Confirm you're registered" gate.
+      if(loggedIn){
+        let savedName = null, savedPin = null;
+        try{
+          savedName = sessionStorage.getItem(LOGIN_NAME_KEY);
+          savedPin = sessionStorage.getItem(LOGIN_PIN_KEY);
+        }catch(e){}
+        const idx = (savedName && savedPin) ? findPlayerByCredentials(savedName, savedPin) : -1;
+        if(idx < 0){
+          // Name/PIN no longer resolves to anyone in this game's roster.
+          loggedIn = false;
+          myPlayerIndex = null;
+          stopHeartbeat();
+          try{ sessionStorage.removeItem(LOGIN_NAME_KEY); sessionStorage.removeItem(LOGIN_PIN_KEY); }catch(e){}
+          loginError.textContent = "";
+          loginPinInput.value = "";
+          updateLoginPinDots();
+        } else if(idx !== myPlayerIndex){
+          // Same player, but the roster order shifted in the new game — follow them.
+          myPlayerIndex = idx;
+        }
+      }
       tryAutoLogin();
       loginOverlay.classList.toggle("show", !loggedIn);
     }
     if(!ok){
+      // No active game right now (admin is mid-reset/mid-setup). Pause this device's
+      // session but keep the saved name+PIN in sessionStorage rather than wiping it —
+      // if the admin brings back a game with the SAME player/PIN (e.g. "keep players"),
+      // tryAutoLogin() below will silently resume this player once data loads again,
+      // instead of forcing them to retype their name and PIN every single deal.
+      if(loggedIn){
+        loggedIn = false;
+        myPlayerIndex = null;
+        stopHeartbeat();
+      }
+      loginError.textContent = "";
+      loginPinInput.value = "";
+      updateLoginPinDots();
+      loginOverlay.classList.add("show");
       app.innerHTML =
         '<header><h1 class="display">🎱 BILLIARD CARDS</h1><p>PLAYER VIEW</p></header>' +
         '<div class="panel"><div class="empty-state"><span class="big">🎱</span>No game in progress yet.<br>Ask the host to deal a game on the admin page — this screen updates automatically once they do.</div></div>' +
