@@ -124,6 +124,9 @@
   @keyframes winnerPop{0%{transform:scale(.88);opacity:0;}100%{transform:scale(1);opacity:1;}}
   @keyframes winnerGlow{0%,100%{filter:brightness(1);}50%{filter:brightness(1.25);}}
 
+  .break-banner{display:flex;align-items:center;justify-content:center;gap:8px;text-align:center;font-weight:700;font-size:.92rem;padding:12px 10px;border-width:1.5px;border-style:solid;}
+  .break-banner-icon{font-size:1.15rem;line-height:1;}
+
   .modal-overlay{position:fixed;inset:0;background:rgba(4,7,5,.72);backdrop-filter:blur(2px);display:none;align-items:flex-end;justify-content:center;padding:0;z-index:50;}
   .modal-overlay.show{display:flex;animation:backdropIn .22s ease;}
   @keyframes backdropIn{from{opacity:0;}to{opacity:1;}}
@@ -278,6 +281,26 @@
       '<div class="winner-banner" style="color:' + wc + ';text-shadow:0 0 16px ' + hexToRgba(wc, .6) + ';">\uD83C\uDFC6 ' + escapeHtml(names[winnerIndex]) + ' WINS!</div>' +
     '</div>';
   }
+  // Shows whose turn it is to break, based on the play order the host sets on the admin page.
+  // Read-only here — this page never edits turnOrder/breakTurnIndex, only displays it.
+  function currentBreakerIndex(){
+    if(!Array.isArray(turnOrder) || turnOrder.length === 0) return null;
+    const valid = turnOrder.length === numPlayers &&
+      turnOrder.every(i => Number.isInteger(i) && i >= 0 && i < numPlayers) &&
+      new Set(turnOrder).size === numPlayers;
+    if(!valid) return null;
+    return turnOrder[breakTurnIndex % turnOrder.length];
+  }
+  function breakBannerHtml(){
+    if(!hands || hands.length === 0) return "";
+    const b = currentBreakerIndex();
+    if(b == null || !names[b]) return "";
+    const wc = playerColor(b);
+    return '<div class="panel break-banner" style="border-color:' + wc + ';background:' + hexToRgba(wc, .12) + ';">' +
+      '<span class="break-banner-icon">\uD83C\uDFB1</span>' +
+      '<span>Next to break: <span style="color:' + wc + ';">' + escapeHtml(names[b]) + '</span></span>' +
+    '</div>';
+  }
   // Was the ball's current credited sinker actually holding a matching card at sink time?
   // Returns false when we don't have ownership data yet, so we never falsely flag a mismatch.
   function isMismatch(n){
@@ -295,6 +318,7 @@
   const app = document.getElementById("app");
 
   let numPlayers = 0, pins = [], names = [], hands = [], ballSunk = [], ballSunkBy = [], ballOwners = [], winnerIndex = null, scores = [], joinedPlayers = [], lastSeen = [];
+  let turnOrder = [], breakTurnIndex = 0; // play order set by the host on the admin page — read-only here
 
   // ---- who's holding this phone right now ----
   let loggedIn = false, myPlayerIndex = null;
@@ -392,6 +416,7 @@
   // from this device's own tap or was just pulled in from another player's phone.
   let prevBallSunk = null;
   let prevWinnerIndex = null;
+  let prevBreakerIndex = undefined; // undefined = not yet observed, distinct from null (no valid breaker)
   let feedbackReady = false;
   function pulseBall(n){
     const wraps = document.querySelectorAll("#ballsRack .ball-wrap");
@@ -417,6 +442,13 @@
         fireConfetti();
         toast("\uD83C\uDFC6 " + names[winnerIndex] + " wins the game!", {duration:4200, gold:true});
       }
+      const breaker = currentBreakerIndex();
+      if(breaker != null && breaker !== prevBreakerIndex && prevBreakerIndex !== undefined){
+        toast("\uD83C\uDFB1 " + names[breaker] + " breaks next!", {duration:4200, gold:true});
+      }
+      prevBreakerIndex = breaker;
+    } else {
+      prevBreakerIndex = currentBreakerIndex();
     }
     prevBallSunk = ballSunk.slice();
     prevWinnerIndex = winnerIndex;
@@ -687,6 +719,20 @@
     handOverlay.classList.remove("show");
   });
   closeOnBackdrop(handOverlay, () => handOverlay.classList.remove("show"));
+  // Orders a hand by rank (A,2-10,J,Q,K) then suit, purely for display in the
+  // hand modal — does not touch the underlying hands[] data or any other logic.
+  const CARD_RANK_ORDER = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
+  function cardRankValue(label){
+    const idx = CARD_RANK_ORDER.indexOf(String(label).toUpperCase());
+    return idx === -1 ? 999 : idx;
+  }
+  function sortHandForDisplay(hand){
+    return [...hand].sort((a, b) => {
+      const ra = cardRankValue(a.label), rb = cardRankValue(b.label);
+      if(ra !== rb) return ra - rb;
+      return String(a.suit || "").localeCompare(String(b.suit || ""));
+    });
+  }
   function openHand(playerName, hand, p){
     handTitle.textContent = playerName + "'s Hand";
     handTitle.style.color = (p != null) ? playerColor(p) : "var(--gold)";
@@ -694,7 +740,7 @@
     if(hand.length === 0){
       handGrid.innerHTML = "<div style='color:var(--muted);padding:10px;'>No cards left</div>";
     }
-    hand.forEach(c => {
+    sortHandForDisplay(hand).forEach(c => {
       const mc = document.createElement("div");
       mc.className = "mini-card " + (c.color === 1 ? "red" : "black");
       mc.innerHTML = "<div>" + c.label + "</div><div class='suit'>" + c.suit + "</div>";
@@ -727,6 +773,8 @@
       scores = data.scores || new Array(numPlayers).fill(0);
       joinedPlayers = data.joined_players || [];
       lastSeen = data.last_seen || [];
+      turnOrder = data.turn_order || [];
+      breakTurnIndex = data.break_turn_index || 0;
       return true;
     }catch(e){ console.error("Supabase load failed:", e); return false; }
   }
@@ -936,7 +984,7 @@
         '</div>' +
         '<div class="score-rows" id="scoreRows"></div>' +
       '</div>' +
-      (winnerIndex !== null ? winnerBannerHtml(winnerIndex, names, escapeHtml) : '') +
+      (winnerIndex !== null ? winnerBannerHtml(winnerIndex, names, escapeHtml) : breakBannerHtml()) +
       '<div class="panel">' +
         '<div class="section-title">Ball Rack — tap a ball to record or view who sunk it</div>' +
         '<div class="progress-track"><div class="progress-fill" style="width:' + pct + '%;"></div></div>' +

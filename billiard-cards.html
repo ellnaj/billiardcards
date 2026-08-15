@@ -130,6 +130,18 @@
   .status-grid .label{color:var(--muted);font-size:.66rem;text-transform:uppercase;letter-spacing:.5px;}
   .status-grid .value{font-weight:700;font-size:1rem;}
 
+  .order-list{display:flex;flex-direction:column;gap:8px;max-height:55vh;overflow-y:auto;}
+  .order-row{display:flex;align-items:center;justify-content:space-between;background:#0d1210;border:1px solid var(--border);border-radius:var(--radius-sm);padding:9px 10px;gap:10px;}
+  .order-row-left{display:flex;align-items:center;gap:10px;min-width:0;}
+  .order-pos{width:22px;flex:none;text-align:center;font-family:'Bebas Neue',Impact,sans-serif;font-size:1.1rem;color:var(--gold);}
+  .order-name{font-weight:700;font-size:.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .order-btns{display:flex;gap:6px;flex:none;}
+  .order-btns .pin-change-btn:disabled{opacity:.32;cursor:not-allowed;}
+  .order-hint{color:var(--muted);text-align:center;font-size:.72rem;margin-top:12px;line-height:1.4;}
+
+  .break-banner{display:flex;align-items:center;justify-content:center;gap:8px;text-align:center;font-weight:700;font-size:.92rem;padding:12px 10px;border-width:1.5px;border-style:solid;}
+  .break-banner-icon{font-size:1.15rem;line-height:1;}
+
   .winner-banner{text-align:center;font-weight:900;font-size:1.35rem;padding:4px 0;letter-spacing:.3px;}
   .winner-panel{border-width:2px;border-style:solid;animation:winnerPop .45s cubic-bezier(.34,1.56,.64,1),winnerGlow 2.2s ease-in-out infinite;}
   @keyframes winnerPop{0%{transform:scale(.88);opacity:0;}100%{transform:scale(1);opacity:1;}}
@@ -307,6 +319,18 @@
     <div class="btn-row">
       <button class="btn-secondary" id="renameCancel">Cancel</button>
       <button class="btn btn-primary" id="renameSave" style="flex:1;">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="orderOverlay">
+  <div class="modal">
+    <h3>Set Play Order</h3>
+    <div class="order-list" id="orderList"></div>
+    <div class="order-hint">Use ▲ / ▼ to arrange players from first to last. The player on top breaks first.</div>
+    <div class="btn-row">
+      <button class="btn-secondary" id="orderCancel">Cancel</button>
+      <button class="btn btn-primary" id="orderSave" style="flex:1;">Save Order</button>
     </div>
   </div>
 </div>
@@ -761,7 +785,7 @@
   // so that (for example) ball_sunk_by keeps saving even if ball_owners' column is the
   // one that's missing. Silently dropping both whenever either was missing is what used
   // to make the "ball doesn't match your hand" warning silently stop persisting.
-  const OPTIONAL_COLUMNS = ["ball_sunk_by", "ball_owners"];
+  const OPTIONAL_COLUMNS = ["ball_sunk_by", "ball_owners", "turn_order", "break_turn_index"];
   function missingColumnField(error){
     const msg = (error && error.message) || "";
     return OPTIONAL_COLUMNS.find(f => new RegExp(f, "i").test(msg)) || null;
@@ -790,7 +814,8 @@
       in_game: inGame !== undefined ? inGame : true,
       num_players: numPlayers,
       names: names, pins: pins, hands: hands, ball_sunk: ballSunk, ball_sunk_by: ballSunkBy, ball_owners: ballOwners,
-      winner_index: winnerIndex, scores: scores
+      winner_index: winnerIndex, scores: scores,
+      turn_order: turnOrder, break_turn_index: breakTurnIndex
     };
     try{
       if(gameRowId){
@@ -850,6 +875,11 @@
       scores = data.scores || new Array(numPlayers).fill(0);
       joinedPlayers = data.joined_players || [];
       lastSeen = data.last_seen || [];
+      turnOrder = data.turn_order || [];
+      breakTurnIndex = data.break_turn_index || 0;
+      // A game is already loaded, so the next "New Game" click should rotate the
+      // breaker rather than treat it as the very first deal of the session.
+      firstDealDone = true;
       return true;
     }catch(e){ console.error("Supabase load failed:", e); return false; }
   }
@@ -1109,6 +1139,73 @@
     renderGame(true);
   }
 
+  // ---- play order: who breaks first, second, ... last ----
+  const orderOverlay = document.getElementById("orderOverlay");
+  const orderList = document.getElementById("orderList");
+  document.getElementById("orderCancel").addEventListener("click", () => orderOverlay.classList.remove("show"));
+  closeOnBackdrop(orderOverlay, () => orderOverlay.classList.remove("show"));
+  document.getElementById("orderSave").addEventListener("click", () => {
+    breakTurnIndex = 0; // a freshly-saved order always starts with the top player breaking next
+    saveState();
+    orderOverlay.classList.remove("show");
+    renderGame(true);
+    notifyNextBreaker("Play order saved");
+  });
+  function openTurnOrder(){
+    ensureTurnOrder();
+    renderOrderList();
+    orderOverlay.classList.add("show");
+  }
+  function renderOrderList(){
+    orderList.innerHTML = "";
+    turnOrder.forEach((p, pos) => {
+      const row = document.createElement("div");
+      row.className = "order-row";
+      const left = document.createElement("div");
+      left.className = "order-row-left";
+      const posBadge = document.createElement("span");
+      posBadge.className = "order-pos";
+      posBadge.textContent = String(pos + 1);
+      const icon = document.createElement("div");
+      icon.className = "player-icon";
+      icon.style.background = playerColor(p);
+      icon.textContent = getInitials(names[p]);
+      const nm = document.createElement("span");
+      nm.className = "order-name";
+      nm.textContent = names[p] + (pos === 0 ? " (breaks first)" : "");
+      left.appendChild(posBadge);
+      left.appendChild(icon);
+      left.appendChild(nm);
+      const btns = document.createElement("div");
+      btns.className = "order-btns";
+      const up = document.createElement("button");
+      up.className = "pin-change-btn";
+      up.title = "Move up";
+      up.textContent = "\u25B2";
+      up.disabled = pos === 0;
+      up.addEventListener("click", () => moveTurnOrder(pos, -1));
+      const down = document.createElement("button");
+      down.className = "pin-change-btn";
+      down.title = "Move down";
+      down.textContent = "\u25BC";
+      down.disabled = pos === turnOrder.length - 1;
+      down.addEventListener("click", () => moveTurnOrder(pos, 1));
+      btns.appendChild(up);
+      btns.appendChild(down);
+      row.appendChild(left);
+      row.appendChild(btns);
+      orderList.appendChild(row);
+    });
+  }
+  function moveTurnOrder(pos, dir){
+    const target = pos + dir;
+    if(target < 0 || target >= turnOrder.length) return;
+    const tmp = turnOrder[pos];
+    turnOrder[pos] = turnOrder[target];
+    turnOrder[target] = tmp;
+    renderOrderList();
+  }
+
   // ---- deck ----
   function cardsPerPlayer(n){
     if(n <= 3) return 13;
@@ -1158,6 +1255,42 @@
   let setupStep = 0;  // index of player currently setting PIN
   let carryOver = null; // {names, pins} snapshot offered for reuse when "Keep Players" is chosen
 
+  // Play order: which player breaks first, second, ... last, and whose turn it is to break now.
+  let turnOrder = [];       // array of player indices, first-to-last break order
+  let breakTurnIndex = 0;   // index into turnOrder pointing at whose turn it is to break
+  let firstDealDone = false; // set true after the first deal this session, so later "New Game" deals rotate the breaker
+  // Falls back to natural player order (0,1,2,...) whenever turnOrder doesn't match the
+  // current set of players — e.g. right after setup, or if the player count changed.
+  function ensureTurnOrder(){
+    const valid = Array.isArray(turnOrder) && turnOrder.length === numPlayers &&
+      turnOrder.every(i => Number.isInteger(i) && i >= 0 && i < numPlayers) &&
+      new Set(turnOrder).size === numPlayers;
+    if(!valid){
+      turnOrder = names.map((_, i) => i);
+      if(breakTurnIndex >= turnOrder.length) breakTurnIndex = 0;
+    }
+  }
+  function currentBreakerIndex(){
+    ensureTurnOrder();
+    if(turnOrder.length === 0) return null;
+    return turnOrder[breakTurnIndex % turnOrder.length];
+  }
+  function breakBannerHtml(){
+    if(!hands || hands.length === 0) return "";
+    const b = currentBreakerIndex();
+    if(b == null || !names[b]) return "";
+    const wc = playerColor(b);
+    return '<div class="panel break-banner" style="border-color:' + wc + ';background:' + hexToRgba(wc, .12) + ';">' +
+      '<span class="break-banner-icon">\uD83C\uDFB1</span>' +
+      '<span>Next to break: <span style="color:' + wc + ';">' + escapeHtml(names[b]) + '</span></span>' +
+    '</div>';
+  }
+  function notifyNextBreaker(prefix){
+    const b = currentBreakerIndex();
+    if(b == null || !names[b]) return;
+    toast((prefix ? prefix + " \u2014 " : "") + "\uD83C\uDFB1 " + names[b] + " breaks next!", {duration:4200, gold:true});
+  }
+
   // Tracks which screen is showing so the auto-refresh poll below knows whether it's
   // safe to pull in remote changes (e.g. a player sinking a ball on their own page)
   // without interrupting the admin mid-setup or mid-interaction.
@@ -1190,10 +1323,11 @@
       pinOverlay.classList.contains("show") ||
       handOverlay.classList.contains("show") ||
       renameOverlay.classList.contains("show") ||
-      whoSunkOverlay.classList.contains("show");
+      whoSunkOverlay.classList.contains("show") ||
+      orderOverlay.classList.contains("show");
   }
   function gameSnapshot(){
-    return JSON.stringify({ numPlayers, names, pins, hands, ballSunk, ballSunkBy, ballOwners, winnerIndex, scores, joinedPlayers, entriesToday, lastSeen });
+    return JSON.stringify({ numPlayers, names, pins, hands, ballSunk, ballSunkBy, ballOwners, winnerIndex, scores, joinedPlayers, entriesToday, lastSeen, turnOrder, breakTurnIndex });
   }
   function startLivePolling(){
     setInterval(async () => {
@@ -1390,6 +1524,13 @@
 
   // ---------- deal & main game ----------
   function dealGame(){
+    ensureTurnOrder();
+    // First deal of the session breaks with whoever is on top of the order; every deal
+    // after that (i.e. every "New Game") rotates the break to the next player in line.
+    if(firstDealDone && turnOrder.length > 0){
+      breakTurnIndex = (breakTurnIndex + 1) % turnOrder.length;
+    }
+    firstDealDone = true;
     const perPlayer = cardsPerPlayer(numPlayers);
     const deck = shuffleArray(buildDeck());
     hands = [];
@@ -1408,6 +1549,7 @@
     saveState();
     renderGame();
     toast("Cards dealt — good luck! \uD83C\uDFB1");
+    setTimeout(() => notifyNextBreaker(), 700);
   }
 
   // playerIndex: the player credited with sinking the ball, chosen from the "Who Sunk Ball #" picker
@@ -1457,6 +1599,9 @@
     scores = [];
     setupStep = 0;
     carryOver = null;
+    turnOrder = [];
+    breakTurnIndex = 0;
+    firstDealDone = false;
     clearState();
     clearAllEntries();
     renderSetupCount();
@@ -1469,6 +1614,9 @@
     ballSunkBy = [];
     ballOwners = [];
     winnerIndex = null;
+    turnOrder = [];
+    breakTurnIndex = 0;
+    firstDealDone = false;
     clearState();
     clearAllEntries();
     renderSetupCount();
@@ -1495,7 +1643,7 @@
         '</div>' +
         '<div class="score-rows" id="scoreRows"></div>' +
       '</div>' +
-      (winnerIndex !== null ? winnerBannerHtml(winnerIndex, names, escapeHtml) : '') +
+      (winnerIndex !== null ? winnerBannerHtml(winnerIndex, names, escapeHtml) : breakBannerHtml()) +
       '<div class="panel">' +
         '<div class="section-title">Ball Rack — tap a ball to record who sunk it</div>' +
         '<div class="progress-track"><div class="progress-fill" style="width:' + pct + '%;"></div></div>' +
@@ -1508,7 +1656,10 @@
         '</div>' +
       '</div>' +
       '<div class="panel">' +
-        '<div class="section-title">Players — green dot means they\u2019re currently connected</div>' +
+        '<div class="section-title-row">' +
+          '<div class="section-title">Players — green dot means they\u2019re currently connected</div>' +
+          '<button class="pin-change-btn" id="turnOrderBtn" title="Set play order">\uD83D\uDD00</button>' +
+        '</div>' +
         '<div class="players-list" id="playersList"></div>' +
       '</div>' +
       '<div class="btn-row">' +
@@ -1659,6 +1810,7 @@
       askReset();
     });
     document.getElementById("hostSettingsBtn").addEventListener("click", openHostSettings);
+    document.getElementById("turnOrderBtn").addEventListener("click", openTurnOrder);
 
     updateSyncBadge();
     processLiveFeedback();
