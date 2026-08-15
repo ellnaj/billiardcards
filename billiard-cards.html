@@ -1707,7 +1707,9 @@
     }
 
     const list = document.getElementById("playersList");
-    for(let p = 0; p < numPlayers; p++){
+    ensureTurnOrder();
+    const playerDisplayOrder = turnOrder.length === numPlayers ? turnOrder : names.map((_, i) => i);
+    for(const p of playerDisplayOrder){
       const row = document.createElement("div");
       row.className = "player-row" + (winnerIndex === p ? " winner" : "");
       const left = document.createElement("div");
