@@ -171,6 +171,7 @@
   @keyframes cardDeal{from{transform:translateY(14px) scale(.85);opacity:0;}to{transform:translateY(0) scale(1);opacity:1;}}
   .mini-card.red{color:var(--red);}
   .mini-card.black{color:var(--black);}
+  .mini-card.joker{color:#9c7d2e;background:linear-gradient(160deg,#fff8e4,#f0e2b8);}
   .mini-card .suit{font-size:1.15rem;}
 
   .empty-state{text-align:center;color:var(--muted);padding:44px 10px;font-size:.92rem;line-height:1.7;}
@@ -742,7 +743,7 @@
     }
     sortHandForDisplay(hand).forEach(c => {
       const mc = document.createElement("div");
-      mc.className = "mini-card " + (c.color === 1 ? "red" : "black");
+      mc.className = "mini-card " + (c.color === 2 ? "joker" : (c.color === 1 ? "red" : "black"));
       mc.innerHTML = "<div>" + c.label + "</div><div class='suit'>" + c.suit + "</div>";
       handGrid.appendChild(mc);
     });
@@ -903,12 +904,14 @@
         if(hand[i].ball === n) hand.splice(i, 1);
       }
     });
-    for(let p = 0; p < hands.length; p++){
-      if(hands[p].length === 0 && winnerIndex === null){
-        winnerIndex = p;
-        scores[p] = (scores[p] || 0) + 1;
-        break;
-      }
+    // Winner is whoever LAST sank a ball — not just whichever player's hand happens to
+    // reach zero first when scanned in player order. Same rule as the host page: a
+    // ball's rank can be duplicated across several players' hands, so sinking it can
+    // empty more than one hand at once, and the win should go to whoever actually sank
+    // it, not to whichever tied hand has the lowest player index.
+    if(typeof playerIndex === "number" && hands[playerIndex] && hands[playerIndex].length === 0 && winnerIndex === null){
+      winnerIndex = playerIndex;
+      scores[playerIndex] = (scores[playerIndex] || 0) + 1;
     }
     await saveSinkUpdate();
     render();

@@ -63,6 +63,7 @@
   .btn-row{display:flex;gap:10px;}
   .btn-secondary{position:relative;overflow:hidden;flex:1;background:#1a211c;color:var(--white);padding:13px;border-radius:var(--radius-sm);border:1px solid #303a33;font-size:.85rem;font-weight:600;cursor:pointer;font-family:inherit;transition:transform .12s ease;}
   .btn-secondary:active{transform:scale(.965);}
+  .btn-danger{background:#241213;color:#ff8a94;border:1px solid #5c2229;}
 
   .ripple{position:absolute;border-radius:50%;background:rgba(255,255,255,.32);transform:scale(0);animation:rippleAnim .6s ease-out;pointer-events:none;}
   @keyframes rippleAnim{to{transform:scale(2.7);opacity:0;}}
@@ -192,6 +193,7 @@
   @keyframes cardDeal{from{transform:translateY(14px) scale(.85);opacity:0;}to{transform:translateY(0) scale(1);opacity:1;}}
   .mini-card.red{color:var(--red);}
   .mini-card.black{color:var(--black);}
+  .mini-card.joker{color:#9c7d2e;background:linear-gradient(160deg,#fff8e4,#f0e2b8);}
   .mini-card .suit{font-size:1.15rem;}
 
   .setup-step{display:flex;flex-direction:column;gap:10px;}
@@ -308,7 +310,8 @@
   <div class="modal">
     <h3 id="whoSunkTitle">Who Sunk Ball #</h3>
     <div class="who-sunk-list" id="whoSunkList"></div>
-    <button class="btn-secondary" id="whoSunkCancel" style="width:100%;margin-top:12px;">CANCEL</button>
+    <button class="btn-secondary btn-danger" id="whoSunkUndoBtn" style="width:100%;margin-top:12px;display:none;">↩ CANCEL SUNK BALL (FOUL/SCRATCH)</button>
+    <button class="btn-secondary" id="whoSunkCancel" style="width:100%;margin-top:10px;">CLOSE</button>
   </div>
 </div>
 
@@ -785,7 +788,12 @@
   // so that (for example) ball_sunk_by keeps saving even if ball_owners' column is the
   // one that's missing. Silently dropping both whenever either was missing is what used
   // to make the "ball doesn't match your hand" warning silently stop persisting.
-  const OPTIONAL_COLUMNS = ["ball_sunk_by", "ball_owners", "turn_order", "break_turn_index"];
+  // NOTE: ball_sunk_cards (added for the "cancel sunk ball" undo feature) needs this
+  // migration to persist across reloads / sync to other devices:
+  //   ALTER TABLE games ADD COLUMN ball_sunk_cards jsonb;
+  // Until that's run, "cancel sunk ball" still works within the current host session
+  // (see loadStateFromSupabase), it just won't survive a host page reload.
+  const OPTIONAL_COLUMNS = ["ball_sunk_by", "ball_owners", "ball_sunk_cards", "turn_order", "break_turn_index"];
   function missingColumnField(error){
     const msg = (error && error.message) || "";
     return OPTIONAL_COLUMNS.find(f => new RegExp(f, "i").test(msg)) || null;
@@ -814,6 +822,7 @@
       in_game: inGame !== undefined ? inGame : true,
       num_players: numPlayers,
       names: names, pins: pins, hands: hands, ball_sunk: ballSunk, ball_sunk_by: ballSunkBy, ball_owners: ballOwners,
+      ball_sunk_cards: sunkCards,
       winner_index: winnerIndex, scores: scores,
       turn_order: turnOrder, break_turn_index: breakTurnIndex
     };
@@ -871,6 +880,17 @@
       ballSunk = data.ball_sunk || [];
       ballSunkBy = data.ball_sunk_by || new Array(16).fill(null);
       ballOwners = data.ball_owners || new Array(16).fill(null);
+      // If the "games" table doesn't have this column yet (pre-migration), Supabase's
+      // select("*") simply omits the key entirely — as opposed to returning it as null.
+      // In that case we deliberately keep whatever is already in local memory instead of
+      // wiping it, so a ball sunk moments ago can still be cancelled correctly within
+      // this session even before the column exists. Run the migration in the code
+      // comment above (search "ball_sunk_cards") to make this survive page reloads too.
+      if("ball_sunk_cards" in data){
+        sunkCards = data.ball_sunk_cards || new Array(16).fill(null);
+      } else if(!Array.isArray(sunkCards) || sunkCards.length === 0){
+        sunkCards = new Array(16).fill(null);
+      }
       winnerIndex = data.winner_index;
       scores = data.scores || new Array(numPlayers).fill(0);
       joinedPlayers = data.joined_players || [];
@@ -1022,7 +1042,7 @@
     }
     hand.forEach(c => {
       const mc = document.createElement("div");
-      mc.className = "mini-card " + (c.color === 1 ? "red" : "black");
+      mc.className = "mini-card " + (c.color === 2 ? "joker" : (c.color === 1 ? "red" : "black"));
       mc.innerHTML = "<div>" + c.label + "</div><div class='suit'>" + c.suit + "</div>";
       handGrid.appendChild(mc);
     });
@@ -1033,12 +1053,32 @@
   const whoSunkOverlay = document.getElementById("whoSunkOverlay");
   const whoSunkTitle = document.getElementById("whoSunkTitle");
   const whoSunkList = document.getElementById("whoSunkList");
+  const whoSunkUndoBtn = document.getElementById("whoSunkUndoBtn");
+  let whoSunkCurrentBall = null;
   document.getElementById("whoSunkCancel").addEventListener("click", () => {
     whoSunkOverlay.classList.remove("show");
   });
   closeOnBackdrop(whoSunkOverlay, () => whoSunkOverlay.classList.remove("show"));
+  // Lets the host undo a ball that was marked sunk by mistake — most commonly a foul or
+  // scratch on what looked like the game-ending shot. The card goes back to whichever
+  // hand it was removed from, and if that sink had just declared a winner, the win is
+  // reverted (score un-credited, winner banner cleared) so play can continue normally.
+  whoSunkUndoBtn.addEventListener("click", () => {
+    const n = whoSunkCurrentBall;
+    if(n == null) return;
+    whoSunkOverlay.classList.remove("show");
+    const creditedName = ballSunkBy[n] != null && names[ballSunkBy[n]] ? names[ballSunkBy[n]] : null;
+    const willUndoWin = winnerIndex !== null;
+    askConfirm(
+      "Cancel ball #" + n + " as sunk" + (creditedName ? " (credited to " + creditedName + ")" : "") + "? The card goes back to the hand it came from." +
+      (willUndoWin ? " Since this ended the game, the win will be reverted so play can continue." : ""),
+      () => unsinkBall(n)
+    );
+  });
   function openWhoSunk(n){
     const isSunk = !!ballSunk[n];
+    whoSunkCurrentBall = n;
+    whoSunkUndoBtn.style.display = isSunk ? "block" : "none";
     whoSunkTitle.textContent = "WHO SUNK BALL #" + n + "?";
     whoSunkList.innerHTML = "";
     if(numPlayers === 0){
@@ -1219,8 +1259,11 @@
         d.push({label:r, suit:s.symbol, color:s.color, ball:RANK_TO_BALL[r]});
       }
     }
-    d.push({label:"JK", suit:"★", color:2, ball:14});
-    d.push({label:"JK", suit:"★", color:2, ball:15});
+    // Two jokers map to balls 14 and 15 (the two highest-numbered balls on the rack).
+    // Labeled "JK1"/"JK2" with a plain star subtitle — distinct enough to tell them
+    // apart at a glance, without printing the underlying ball number on the card.
+    d.push({label:"JK1", suit:"★", color:2, ball:14});
+    d.push({label:"JK2", suit:"★", color:2, ball:15});
     return d;
   }
   function shuffleArray(arr){
@@ -1238,6 +1281,7 @@
   let hands = [];
   let ballSunk = [];
   let ballSunkBy = []; // player index (or null) credited with sinking each ball number
+  let sunkCards = []; // per ball number: [{p: playerIndex, card}] removed when sunk, for undo
   let ballOwners = []; // per ball number: player indices who actually held a matching card at sink time
   let winnerIndex = null;
   let scores = [];    // wins per player, across "New Game" replays this session
@@ -1327,7 +1371,7 @@
       orderOverlay.classList.contains("show");
   }
   function gameSnapshot(){
-    return JSON.stringify({ numPlayers, names, pins, hands, ballSunk, ballSunkBy, ballOwners, winnerIndex, scores, joinedPlayers, entriesToday, lastSeen, turnOrder, breakTurnIndex });
+    return JSON.stringify({ numPlayers, names, pins, hands, ballSunk, ballSunkBy, ballOwners, sunkCards, winnerIndex, scores, joinedPlayers, entriesToday, lastSeen, turnOrder, breakTurnIndex });
   }
   function startLivePolling(){
     setInterval(async () => {
@@ -1542,6 +1586,7 @@
     ballSunk = new Array(16).fill(false);
     ballSunkBy = new Array(16).fill(null);
     ballOwners = new Array(16).fill(null);
+    sunkCards = new Array(16).fill(null);
     winnerIndex = null;
     prevBallSunk = null;
     prevWinnerIndex = null;
@@ -1562,17 +1607,24 @@
     const owners = [];
     hands.forEach((hand, idx) => { if(hand.some(c => c.ball === n)) owners.push(idx); });
     ballOwners[n] = owners;
-    hands.forEach(hand => {
+    // Also record the exact card objects (and which hand each came from) so a mistaken
+    // sink — e.g. a foul/scratch on the last ball — can be cancelled later and the same
+    // cards handed back to the same players via unsinkBall().
+    const removedCards = [];
+    hands.forEach((hand, idx) => {
       for(let i = hand.length - 1; i >= 0; i--){
-        if(hand[i].ball === n) hand.splice(i, 1);
+        if(hand[i].ball === n){ removedCards.push({ p: idx, card: hand[i] }); hand.splice(i, 1); }
       }
     });
-    for(let p = 0; p < hands.length; p++){
-      if(hands[p].length === 0 && winnerIndex === null){
-        winnerIndex = p;
-        scores[p] = (scores[p] || 0) + 1;
-        break;
-      }
+    sunkCards[n] = removedCards;
+    // Winner is whoever LAST sank a ball — not just whichever player's hand happens to
+    // reach zero first when scanned in player order. A ball's rank can be duplicated
+    // across several players' hands (same rank, different suit), so sinking it can empty
+    // more than one hand at the same instant; the win should go to whoever actually sank
+    // it (the credited player here), not to whichever tied hand has the lowest index.
+    if(typeof playerIndex === "number" && hands[playerIndex] && hands[playerIndex].length === 0 && winnerIndex === null){
+      winnerIndex = playerIndex;
+      scores[playerIndex] = (scores[playerIndex] || 0) + 1;
     }
     saveState();
     renderGame(true);
@@ -1587,6 +1639,34 @@
     toast("Credit updated for ball #" + n);
   }
 
+  // Undo a ball that was marked sunk in error (most commonly: foul/scratch on what
+  // looked like the winning shot). Hands the removed card(s) back to whichever
+  // player(s) they came from and, if that sink had just ended the game, reverts the
+  // win (un-credits the score, clears the winner banner) so play resumes normally.
+  function unsinkBall(n){
+    if(!ballSunk[n]) return;
+    const removedCards = sunkCards[n] || [];
+    removedCards.forEach(entry => {
+      if(hands[entry.p]) hands[entry.p].push(entry.card);
+    });
+    const wasWinner = winnerIndex;
+    ballSunk[n] = false;
+    ballSunkBy[n] = null;
+    ballOwners[n] = null;
+    sunkCards[n] = null;
+    if(wasWinner !== null && hands[wasWinner] && hands[wasWinner].length > 0){
+      // The cancelled ball was the one that had just ended the game — retrieve the win.
+      winnerIndex = null;
+      scores[wasWinner] = Math.max(0, (scores[wasWinner] || 0) - 1);
+      prevWinnerIndex = null;
+      toast("Win reverted — ball #" + n + " put back, game continues");
+    } else {
+      toast("Ball #" + n + " cancelled — card returned to hand");
+    }
+    saveState();
+    renderGame(true);
+  }
+
   function resetToSetup(){
     numPlayers = 4;
     pins = [];
@@ -1595,6 +1675,7 @@
     ballSunk = [];
     ballSunkBy = [];
     ballOwners = [];
+    sunkCards = [];
     winnerIndex = null;
     scores = [];
     setupStep = 0;
@@ -1613,6 +1694,7 @@
     ballSunk = [];
     ballSunkBy = [];
     ballOwners = [];
+    sunkCards = [];
     winnerIndex = null;
     turnOrder = [];
     breakTurnIndex = 0;
